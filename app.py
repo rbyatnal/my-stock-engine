@@ -5,99 +5,182 @@ import numpy as np
 import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
+
+# ============================================================
+# PAGE
+# ============================================================
+
 st.set_page_config(
     layout="wide",
-    page_title="Pro CANSLIM Engine"
+    page_title="Rakshit-Stocks-Terminal"
 )
 
 # ============================================================
-# BLACK / WHITE THEME SWITCH
+# THEME
 # ============================================================
 
 if "theme" not in st.session_state:
     st.session_state.theme = "Black"
 
-theme = st.sidebar.toggle(
-    "⚫ / ⚪ Theme",
-    value=(st.session_state.theme == "Black")
-)
+header_left, header_right = st.columns([10, 1])
 
-st.session_state.theme = "Black" if theme else "White"
+with header_left:
+    st.markdown(
+        """
+        <div style="
+            font-size:20px;
+            font-weight:700;
+            letter-spacing:0.4px;
+            margin-bottom:2px;
+        ">
+            Rakshit-Stocks-Terminal
+            <span style="
+                font-size:12px;
+                font-weight:400;
+                opacity:0.65;
+            ">
+                (In Progress)
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+with header_right:
+    theme = st.toggle(
+        "⚫",
+        value=(st.session_state.theme == "Black")
+    )
+
+    st.session_state.theme = (
+        "Black" if theme else "White"
+    )
+
 
 if st.session_state.theme == "Black":
-    BG = "#000000"
+    BG = "#0E1117"
     TEXT = "#FFFFFF"
-    PANEL = "#111111"
-    BORDER = "#333333"
+    PANEL = "#161B22"
+    BORDER = "#30363D"
 else:
     BG = "#FFFFFF"
-    TEXT = "#000000"
+    TEXT = "#111111"
     PANEL = "#F5F5F5"
-    BORDER = "#D9D9D9"
+    BORDER = "#D0D0D0"
+
 
 st.markdown(
     f"""
     <style>
-        .stApp {{
-            background-color: {BG};
-            color: {TEXT};
-        }}
+    .stApp {{
+        background-color:{BG};
+        color:{TEXT};
+    }}
 
-        [data-testid="stSidebar"] {{
-            background-color: {PANEL};
-        }}
+    .block-container {{
+        padding-top:1rem;
+    }}
 
-        .block-container {{
-            color: {TEXT};
-        }}
+    h1,h2,h3,h4,h5,h6,p,label {{
+        color:{TEXT} !important;
+    }}
 
-        h1, h2, h3, h4, h5, h6, p, label {{
-            color: {TEXT} !important;
-        }}
+    div[data-testid="metric-container"] {{
+        background:{PANEL};
+        border:1px solid {BORDER};
+        border-radius:8px;
+        padding:10px;
+    }}
 
-        .stMetric {{
-            background-color: {PANEL};
-            border: 1px solid {BORDER};
-            border-radius: 10px;
-            padding: 10px;
-        }}
+    input, textarea {{
+        background-color:{PANEL} !important;
+        color:{TEXT} !important;
+    }}
 
-        input, textarea {{
-            background-color: {PANEL} !important;
-            color: {TEXT} !important;
-        }}
-
-        [data-baseweb="select"] > div {{
-            background-color: {PANEL} !important;
-            color: {TEXT} !important;
-        }}
-
-        .stButton > button {{
-            background-color: {PANEL};
-            color: {TEXT};
-            border: 1px solid {BORDER};
-        }}
-
-        .stButton > button:hover {{
-            border-color: {TEXT};
-            color: {TEXT};
-        }}
+    div[data-baseweb="select"] > div {{
+        background-color:{PANEL};
+        color:{TEXT};
+    }}
     </style>
     """,
     unsafe_allow_html=True
 )
 
-st.title("🦅 Professional CAN SLIM Growth Intelligence Terminal")
-
-st.caption(
-    "Asynchronous Random Forest ML Pipeline with Core Metrics Scoreboard — Indian Market (NSE)"
-)
 
 # ============================================================
-# STREAMLINED BACKEND DISCOVERY POOL
+# TITLE
+# ============================================================
+
+st.title(
+    "🦅 Professional CAN SLIM Growth Intelligence Terminal"
+)
+
+st.caption(
+    "Multi-Timeframe Random Forest ML Analysis — Indian Market (NSE)"
+)
+
+
+# ============================================================
+# TIMEFRAME
+# ============================================================
+
+st.subheader("⏱️ ML Analysis Timeframe")
+
+timeframe = st.selectbox(
+    "Select the candle timeframe used by the ML model:",
+    [
+        "5M",
+        "15M",
+        "30M",
+        "1H",
+        "1D"
+    ],
+    index=1
+)
+
+TIMEFRAME_CONFIG = {
+    "5M": {
+        "interval": "5m",
+        "period": "60d",
+        "bars": 100
+    },
+    "15M": {
+        "interval": "15m",
+        "period": "60d",
+        "bars": 100
+    },
+    "30M": {
+        "interval": "30m",
+        "period": "60d",
+        "bars": 100
+    },
+    "1H": {
+        "interval": "1h",
+        "period": "730d",
+        "bars": 100
+    },
+    "1D": {
+        "interval": "1d",
+        "period": "2y",
+        "bars": 100
+    }
+}
+
+selected_config = TIMEFRAME_CONFIG[timeframe]
+
+st.info(
+    f"📊 **ML is analysing the latest {timeframe} candles** "
+    f"and forecasting the next 5 {timeframe} candles. "
+    f"Yahoo Finance data may have a short market-data delay."
+)
+
+
+# ============================================================
+# CORE DISCOVERY POOL
 # ============================================================
 
 CORE_POOL = [
+
     "SYRMA.NS",
     "BSE.NS",
     "LMW.NS",
@@ -110,17 +193,22 @@ CORE_POOL = [
     "DIXON.NS",
     "ZOMATO.NS",
     "CDSL.NS"
+
 ]
 
 
+# ============================================================
+# PROFESSIONAL ML PIPELINE
+# ============================================================
+
 @st.cache_data(ttl=900)
-def professional_ml_pipeline(tickers):
+def professional_ml_pipeline(
+    tickers,
+    interval,
+    period
+):
 
     raw_metrics = []
-
-    # ========================================================
-    # PASS 1: GATHER TECHNICAL & FUNDAMENTAL VECTORS
-    # ========================================================
 
     for t in tickers:
 
@@ -128,30 +216,54 @@ def professional_ml_pipeline(tickers):
 
             stock = yf.Ticker(t)
 
-            hist = stock.history(period="2y")
+            hist = stock.history(
+                period=period,
+                interval=interval,
+                auto_adjust=False
+            )
 
             if hist.empty or len(hist) < 200:
                 continue
 
-            cp = hist["Close"]
+            hist = hist.dropna(
+                subset=["Open", "High", "Low", "Close", "Volume"]
+            )
 
-            current_price = cp.iloc[-1]
+            if len(hist) < 200:
+                continue
 
-            # -------------------------------------------------
-            # CAN SLIM STYLE MOMENTUM
-            # -------------------------------------------------
+            cp = hist["Close"].astype(float)
+
+            current_price = float(cp.iloc[-1])
+
+            # =================================================
+            # MOMENTUM
+            # =================================================
+
+            lookback_1 = min(63, len(cp) - 1)
+            lookback_2 = min(126, len(cp) - 1)
+            lookback_3 = min(252, len(cp) - 1)
 
             q1_perf = (
-                current_price - cp.iloc[-63]
-            ) / cp.iloc[-63]
+                (current_price - cp.iloc[-lookback_1])
+                / cp.iloc[-lookback_1]
+            )
 
             q2_perf = (
-                cp.iloc[-63] - cp.iloc[-126]
-            ) / cp.iloc[-126]
+                (
+                    cp.iloc[-lookback_1]
+                    - cp.iloc[-lookback_2]
+                )
+                / cp.iloc[-lookback_2]
+            )
 
             q3_perf = (
-                cp.iloc[-126] - cp.iloc[-252]
-            ) / cp.iloc[-252]
+                (
+                    cp.iloc[-lookback_2]
+                    - cp.iloc[-lookback_3]
+                )
+                / cp.iloc[-lookback_3]
+            )
 
             weighted_momentum = (
                 q1_perf * 0.40
@@ -159,48 +271,53 @@ def professional_ml_pipeline(tickers):
                 + q3_perf * 0.30
             )
 
-            # -------------------------------------------------
+            # =================================================
             # VOLUME ACCUMULATION / DISTRIBUTION
-            # -------------------------------------------------
+            # =================================================
 
             delta_price = cp.diff()
+            vol = hist["Volume"].astype(float)
 
-            vol = hist["Volume"]
+            volume_window = min(30, len(hist))
 
             green_vol = np.where(
                 delta_price > 0,
                 vol,
                 0
-            )[-30:].sum()
+            )[-volume_window:].sum()
 
             red_vol = np.where(
                 delta_price < 0,
                 vol,
                 0
-            )[-30:].sum()
+            )[-volume_window:].sum()
 
             vol_velocity = (
                 (green_vol - red_vol)
-                / (green_vol + red_vol + 1e-6)
+                /
+                (green_vol + red_vol + 1e-6)
             )
 
-            # -------------------------------------------------
+            # =================================================
             # FUNDAMENTAL PROXY
-            # -------------------------------------------------
+            # =================================================
 
             info = stock.info
 
-            eps_g = info.get("earningsGrowth", 0)
+            eps_g = info.get(
+                "earningsGrowth",
+                0
+            )
 
             eps_raw = (
                 eps_g
                 if eps_g is not None
-                else (q1_perf * 0.5)
+                else q1_perf * 0.5
             )
 
-            # -------------------------------------------------
+            # =================================================
             # PRICE STRUCTURE
-            # -------------------------------------------------
+            # =================================================
 
             high_52w = cp.max()
 
@@ -209,35 +326,50 @@ def professional_ml_pipeline(tickers):
                 / high_52w
             ) * 100
 
-            pivot_price = hist["High"].iloc[-60:-5].max()
+            pivot_window = min(
+                60,
+                len(hist) - 5
+            )
+
+            pivot_price = hist["High"].iloc[
+                -pivot_window:-5
+            ].max()
 
             pct_from_pivot = (
                 (current_price - pivot_price)
                 / pivot_price
             ) * 100
 
-            # -------------------------------------------------
+            # =================================================
             # ML FEATURES
-            # -------------------------------------------------
+            # =================================================
 
             df_features = hist.copy()
 
             df_features["Returns"] = (
-                df_features["Close"].pct_change()
+                df_features["Close"]
+                .pct_change()
             )
 
             df_features["MA10"] = (
-                df_features["Close"].rolling(10).mean()
+                df_features["Close"]
+                .rolling(10)
+                .mean()
             )
 
             df_features["MA30"] = (
-                df_features["Close"].rolling(30).mean()
+                df_features["Close"]
+                .rolling(30)
+                .mean()
             )
 
             df_features["Vol_MA10"] = (
-                df_features["Volume"].rolling(10).mean()
+                df_features["Volume"]
+                .rolling(10)
+                .mean()
             )
 
+            # Next 5 candles
             df_features["Target"] = np.where(
                 df_features["Close"].shift(-5)
                 > df_features["Close"],
@@ -245,7 +377,9 @@ def professional_ml_pipeline(tickers):
                 0
             )
 
-            df_features.dropna(inplace=True)
+            df_features.dropna(
+                inplace=True
+            )
 
             feature_cols = [
                 "Close",
@@ -256,17 +390,24 @@ def professional_ml_pipeline(tickers):
                 "Vol_MA10"
             ]
 
-            X_ml = df_features[feature_cols].values
+            if len(df_features) < 100:
+                continue
 
-            y_ml = df_features["Target"].values
+            X_ml = df_features[
+                feature_cols
+            ].values
 
-            # -------------------------------------------------
+            y_ml = df_features[
+                "Target"
+            ].values
+
+            # =================================================
             # RANDOM FOREST CLASSIFIER
-            # -------------------------------------------------
+            # =================================================
 
             clf = RandomForestClassifier(
-                n_estimators=40,
-                max_depth=5,
+                n_estimators=60,
+                max_depth=6,
                 random_state=42
             )
 
@@ -277,7 +418,9 @@ def professional_ml_pipeline(tickers):
 
             probabilities = clf.predict_proba(
                 np.array([
-                    df_features[feature_cols].iloc[-1]
+                    df_features[
+                        feature_cols
+                    ].iloc[-1]
                 ])
             )
 
@@ -292,42 +435,64 @@ def professional_ml_pipeline(tickers):
                 prob_higher = 50.0
 
             raw_metrics.append({
+
                 "ticker": t,
+
                 "hist": hist,
+
                 "current_price": current_price,
+
                 "pivot_price": pivot_price,
+
                 "pct_from_pivot": pct_from_pivot,
+
                 "raw_momentum": weighted_momentum,
+
                 "raw_vol_velocity": vol_velocity,
+
                 "raw_eps": eps_raw,
+
                 "pct_off_high": pct_off_high,
+
                 "ml_prob": prob_higher
+
             })
 
         except Exception:
+
             continue
 
     if not raw_metrics:
+
         return pd.DataFrame(), {}
 
-    # ========================================================
-    # CROSS-MARKET PERCENTILE CALCULATIONS
-    # ========================================================
+    # =========================================================
+    # CROSS-MARKET PERCENTILE
+    # =========================================================
 
-    df = pd.DataFrame(raw_metrics)
+    df = pd.DataFrame(
+        raw_metrics
+    )
 
     df["Price Strength (RS)"] = (
-        df["raw_momentum"].rank(pct=True) * 98 + 1
+        df["raw_momentum"]
+        .rank(pct=True)
+        * 98
+        + 1
     ).astype(int)
 
     df["EPS Rating"] = (
-        df["raw_eps"].rank(pct=True) * 98 + 1
+        df["raw_eps"]
+        .rank(pct=True)
+        * 98
+        + 1
     ).astype(int)
 
     df["Master Score"] = (
         (
             df["Price Strength (RS)"] * 0.5
-            + df["EPS Rating"] * 0.5
+            +
+            df["EPS Rating"] * 0.5
         )
     ).astype(int)
 
@@ -346,9 +511,9 @@ def professional_ml_pipeline(tickers):
         .apply(assign_ad_grade)
     )
 
-    # ========================================================
+    # =========================================================
     # FINAL RECORDS
-    # ========================================================
+    # =========================================================
 
     final_grid_data = []
 
@@ -358,100 +523,136 @@ def professional_ml_pipeline(tickers):
 
         t = row["ticker"]
 
-        group_rank = np.random.randint(1, 38)
+        group_rank = np.random.randint(
+            1,
+            38
+        )
 
         status = (
+
             "🟩 Actionable Entry"
+
             if (
                 row["Master Score"] >= 75
-                and 0 <= row["pct_from_pivot"] <= 6
+                and
+                0 <= row["pct_from_pivot"] <= 6
             )
-            else "🔄 Consolidation Base"
+
+            else
+
+            "🔄 Consolidation Base"
         )
 
         rec = {
 
             "Ticker": t,
 
-            "Price": f"₹{row['current_price']:.2f}",
+            "Price":
+                f"₹{row['current_price']:.2f}",
 
-            "Master Score": f"{row['Master Score']}/99",
+            "Master Score":
+                f"{row['Master Score']}/99",
 
-            "EPS Rating": f"{row['EPS Rating']}/99",
+            "EPS Rating":
+                f"{row['EPS Rating']}/99",
 
-            "Price Strength (RS)": (
-                f"{row['Price Strength (RS)']}/99"
-            ),
+            "Price Strength (RS)":
+                f"{row['Price Strength (RS)']}/99",
 
-            "Group Rank": f"#{group_rank}",
+            "Group Rank":
+                f"#{group_rank}",
 
-            "Acc/Dis Grade": row["Acc/Dis Grade"],
+            "Acc/Dis Grade":
+                row["Acc/Dis Grade"],
 
-            "Pivot Delta": (
-                f"{row['pct_from_pivot']:.1f}%"
-            ),
+            "Pivot Delta":
+                f"{row['pct_from_pivot']:.1f}%",
 
-            "ML Probability": (
-                f"{row['ml_prob']:.1f}%"
-            ),
+            "ML Probability":
+                f"{row['ml_prob']:.1f}%",
 
-            "Status": status,
+            "Status":
+                status,
 
-            "raw_pivot": row["pivot_price"],
+            "raw_pivot":
+                row["pivot_price"],
 
-            "raw_hist": row["hist"],
+            "raw_hist":
+                row["hist"],
 
-            "raw_master_score": row["Master Score"],
+            "raw_master_score":
+                row["Master Score"],
 
-            "raw_eps": row["EPS Rating"],
+            "raw_eps":
+                row["EPS Rating"],
 
-            "raw_rs": row["Price Strength (RS)"],
+            "raw_rs":
+                row["Price Strength (RS)"],
 
-            "raw_group": group_rank,
+            "raw_group":
+                group_rank,
 
-            "raw_pivot_delta": row["pct_from_pivot"],
+            "raw_pivot_delta":
+                row["pct_from_pivot"],
 
-            "raw_ml_prob": row["ml_prob"]
+            "raw_ml_prob":
+                row["ml_prob"]
 
         }
 
-        final_grid_data.append(rec)
+        final_grid_data.append(
+            rec
+        )
 
         records_dictionary[t] = rec
 
     df_sorted = (
-        pd.DataFrame(final_grid_data)
+        pd.DataFrame(
+            final_grid_data
+        )
         .sort_values(
             by="raw_ml_prob",
             ascending=False
         )
     )
 
-    return df_sorted, records_dictionary
+    return (
+        df_sorted,
+        records_dictionary
+    )
 
 
 # ============================================================
-# EXECUTE ANALYTICS PIPELINE
+# EXECUTE ML PIPELINE
 # ============================================================
 
-df_ranking, master_records = professional_ml_pipeline(
-    CORE_POOL
-)
+with st.spinner(
+    f"Analysing latest {timeframe} market data..."
+):
+
+    df_ranking, master_records = (
+        professional_ml_pipeline(
+            CORE_POOL,
+            selected_config["interval"],
+            selected_config["period"]
+        )
+    )
 
 
 # ============================================================
-# SECTION 1: GLOBAL LEADERBOARD
+# GLOBAL LEADERBOARD
 # ============================================================
 
 st.subheader(
-    "📋 1. Comparative Performance Matrix "
-    "(Ranked by Asynchronous ML Probability)"
+    f"📋 1. Comparative Performance Matrix — {timeframe}"
 )
 
 if not df_ranking.empty:
 
     st.dataframe(
+
         df_ranking[
+
             [
                 "Ticker",
                 "Price",
@@ -463,16 +664,20 @@ if not df_ranking.empty:
                 "Pivot Delta",
                 "Status"
             ]
+
         ],
+
         use_container_width=True,
+
         hide_index=True
     )
+
 
 st.markdown("---")
 
 
 # ============================================================
-# SECTION 2: LIVE SEARCH
+# LIVE SEARCH
 # ============================================================
 
 st.subheader(
@@ -480,12 +685,16 @@ st.subheader(
 )
 
 search_query = st.text_input(
-    "Search or query any specific stock ticker directly "
-    "(e.g. SYRMA.NS, HAL.NS, ZOMATO.NS):",
+
+    "Search any NSE ticker "
+    "(e.g. HAL.NS, BEL.NS, DIXON.NS):",
+
     ""
+
 ).strip().upper()
 
 active_selection = None
+
 
 if search_query:
 
@@ -496,24 +705,30 @@ if search_query:
     else:
 
         with st.spinner(
-            f"Evaluating raw data architecture for {search_query}..."
+            f"Evaluating {search_query} on {timeframe} timeframe..."
         ):
 
-            _, extra_rec = professional_ml_pipeline(
-                [search_query]
+            _, extra_rec = (
+                professional_ml_pipeline(
+                    [search_query],
+                    selected_config["interval"],
+                    selected_config["period"]
+                )
             )
 
             if search_query in extra_rec:
 
-                master_records.update(extra_rec)
+                master_records.update(
+                    extra_rec
+                )
 
                 active_selection = search_query
 
             else:
 
                 st.error(
-                    "Invalid ticker code syntax. "
-                    "Ensure '.NS' is added at the end."
+                    "Invalid ticker or insufficient market data. "
+                    "Use NSE format such as HAL.NS."
                 )
 
 else:
@@ -526,23 +741,27 @@ else:
 
 
 # ============================================================
-# SECTION 3: SCOREBOARD + ML CHART
+# SCOREBOARD + ML CHART
 # ============================================================
 
 if (
     active_selection
-    and active_selection in master_records
+    and
+    active_selection in master_records
 ):
 
-    s = master_records[active_selection]
+    s = master_records[
+        active_selection
+    ]
 
     st.markdown(
-        f"### Live Metrics File For: **{active_selection}**"
+        f"### Live Metrics — **{active_selection}** | "
+        f"Timeframe: **{timeframe}**"
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # SCOREBOARD
-    # --------------------------------------------------------
+    # ========================================================
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
 
@@ -629,6 +848,7 @@ if (
     )
 
     st.info(
+
         f"🔴 **Calculated Risk Limits:** "
         f"Technical Stop Loss Floor: "
         f"₹{s['raw_pivot'] * 0.93:.2f} (-7%) | "
@@ -636,13 +856,14 @@ if (
         f"₹{s['raw_pivot'] * 1.20:.2f} (+20%)"
     )
 
+
     # ========================================================
-    # ML HISTORICAL PATTERN CONTINUATION CHART
+    # HISTORICAL PATTERN ML MODEL
     # ========================================================
 
-    df_chart = s["raw_hist"].copy()
-
-    # Clean Yahoo Finance date index
+    df_chart = s[
+        "raw_hist"
+    ].copy()
 
     df_chart.index = pd.to_datetime(
         df_chart.index
@@ -651,17 +872,14 @@ if (
     if df_chart.index.tz is not None:
 
         df_chart.index = (
-            df_chart.index.tz_localize(None)
+            df_chart.index
+            .tz_localize(None)
         )
 
     df_chart = df_chart.sort_index()
 
-    # --------------------------------------------------------
-    # HISTORICAL PATTERN MODEL
-    # --------------------------------------------------------
 
     pattern_length = 5
-
     future_steps = 5
 
     close_values = (
@@ -671,7 +889,6 @@ if (
     )
 
     X_pattern = []
-
     y_pattern = []
 
     for i in range(
@@ -694,7 +911,8 @@ if (
 
         future_return = (
             close_values[i + future_steps]
-            / close_values[i]
+            /
+            close_values[i]
         ) - 1
 
         X_pattern.append(
@@ -709,15 +927,21 @@ if (
 
     if len(X_pattern) >= 30:
 
-        X_pattern = np.array(X_pattern)
+        X_pattern = np.array(
+            X_pattern
+        )
 
-        y_pattern = np.array(y_pattern)
+        y_pattern = np.array(
+            y_pattern
+        )
 
-        pattern_model = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=6,
-            min_samples_leaf=3,
-            random_state=42
+        pattern_model = (
+            RandomForestRegressor(
+                n_estimators=100,
+                max_depth=6,
+                min_samples_leaf=3,
+                random_state=42
+            )
         )
 
         pattern_model.fit(
@@ -729,23 +953,31 @@ if (
             -pattern_length:
         ]
 
-        current_base = current_pattern[0]
+        current_base = (
+            current_pattern[0]
+        )
 
         if current_base != 0:
 
             current_normalized = (
-                current_pattern / current_base
+                current_pattern
+                /
+                current_base
             ) - 1
 
             predicted_return = float(
                 pattern_model.predict(
-                    current_normalized.reshape(1, -1)
+                    current_normalized.reshape(
+                        1,
+                        -1
+                    )
                 )[0]
             )
 
-    # --------------------------------------------------------
-    # CREATE FUTURE PRICE PATH
-    # --------------------------------------------------------
+
+    # ========================================================
+    # FUTURE PRICE PATH
+    # ========================================================
 
     current_price = float(
         df_chart["Close"].iloc[-1]
@@ -760,65 +992,98 @@ if (
 
         step_return = (
             predicted_return
-            * (i / future_steps)
+            *
+            (i / future_steps)
         )
 
         future_price = (
             current_price
-            * (1 + step_return)
+            *
+            (1 + step_return)
         )
 
         future_prices.append(
             future_price
         )
 
+
+    # ========================================================
+    # FUTURE DATES
+    # ========================================================
+
     future_dates = pd.bdate_range(
+
         start=(
             df_chart.index[-1]
-            + pd.Timedelta(days=1)
+            +
+            pd.Timedelta(days=1)
         ),
+
         periods=future_steps
     )
 
-    projection_dates = [
-        df_chart.index[-1]
-    ] + list(future_dates)
+    projection_dates = (
+        [df_chart.index[-1]]
+        +
+        list(future_dates)
+    )
 
-    projection_prices = [
-        current_price
-    ] + future_prices
+    projection_prices = (
+        [current_price]
+        +
+        future_prices
+    )
 
-    # --------------------------------------------------------
-    # BUILD CHART
-    # --------------------------------------------------------
+
+    # ========================================================
+    # CHART — LATEST CANDLES
+    # ========================================================
+
+    chart_data = df_chart.tail(
+        selected_config["bars"]
+    )
+
 
     fig = go.Figure()
 
-    chart_data = df_chart.tail(60)
 
     # Historical candles
 
     fig.add_trace(
+
         go.Candlestick(
+
             x=chart_data.index,
+
             open=chart_data["Open"],
+
             high=chart_data["High"],
+
             low=chart_data["Low"],
+
             close=chart_data["Close"],
-            name="Historical Price"
+
+            name=f"{timeframe} Candles"
         )
     )
 
-    # Existing pivot line
+
+    # Pivot
 
     fig.add_trace(
+
         go.Scatter(
+
             x=chart_data.index,
+
             y=[
                 s["raw_pivot"]
             ] * len(chart_data),
+
             mode="lines",
+
             name="Breakout Pivot",
+
             line=dict(
                 color="orange",
                 width=2,
@@ -827,57 +1092,83 @@ if (
         )
     )
 
-    # --------------------------------------------------------
-    # ML FUTURE CONTINUATION
-    # --------------------------------------------------------
+
+    # ========================================================
+    # ML PROJECTION
+    # ========================================================
 
     fig.add_trace(
+
         go.Scatter(
+
             x=projection_dates,
+
             y=projection_prices,
+
             mode="lines+markers",
-            name="ML Pattern Projection",
+
+            name=f"ML Next 5 {timeframe} Candles",
+
             line=dict(
                 color="cyan",
                 width=4
             ),
+
             marker=dict(
                 size=7
             )
         )
     )
 
-    # Strong highlight immediately after current candle
+
+    # Highlight first projected candle
 
     if len(projection_dates) >= 2:
 
         fig.add_trace(
+
             go.Scatter(
+
                 x=[
                     projection_dates[0],
                     projection_dates[1]
                 ],
+
                 y=[
                     projection_prices[0],
                     projection_prices[1]
                 ],
+
                 mode="lines",
+
                 line=dict(
                     color="yellow",
                     width=6
                 ),
+
                 showlegend=False
             )
         )
 
-    # Current price marker
+
+    # Current price
 
     fig.add_trace(
+
         go.Scatter(
-            x=[df_chart.index[-1]],
-            y=[current_price],
+
+            x=[
+                df_chart.index[-1]
+            ],
+
+            y=[
+                current_price
+            ],
+
             mode="markers",
+
             name="Current Price",
+
             marker=dict(
                 size=10,
                 color="yellow"
@@ -885,57 +1176,80 @@ if (
         )
     )
 
+
     # ========================================================
-    # CHART THEME
+    # CHART LAYOUT
     # ========================================================
 
     fig.update_layout(
-        template=(
-            "plotly_dark"
-            if st.session_state.theme == "Black"
-            else "plotly_white"
-        ),
+
         title=(
             f"{active_selection} — "
-            f"Historical Pattern + ML Continuation"
+            f"{timeframe} Current Market View | "
+            f"ML Next 5 Candles"
         ),
+
         yaxis_title="Price (INR)",
-        xaxis_title="Date",
+
+        xaxis_title=f"Time — {timeframe} candles",
+
         xaxis_rangeslider_visible=False,
+
         height=500,
+
         margin=dict(
             l=15,
             r=15,
             t=50,
             b=15
         ),
-        hovermode="x unified"
+
+        hovermode="x unified",
+
+        template=(
+            "plotly_dark"
+            if st.session_state.theme == "Black"
+            else "plotly_white"
+        )
     )
+
 
     st.plotly_chart(
         fig,
         use_container_width=True
     )
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # ML PROJECTION SUMMARY
-    # --------------------------------------------------------
+    # ========================================================
 
     direction = (
+
         "UP"
         if predicted_return > 0
-        else "DOWN"
+
+        else
+
+        "DOWN"
         if predicted_return < 0
-        else "FLAT"
+
+        else
+
+        "FLAT"
     )
 
-    projected_final_price = future_prices[-1]
+    projected_final_price = (
+        future_prices[-1]
+    )
 
     st.caption(
-        f"📈 ML historical-pattern continuation: "
-        f"**{direction}** | "
-        f"Current: ₹{current_price:.2f} → "
-        f"5-point projected: ₹{projected_final_price:.2f} | "
+
+        f"🤖 **ML {timeframe} analysis:** "
+        f"Current ₹{current_price:.2f} → "
+        f"5-{timeframe}-candle projection "
+        f"₹{projected_final_price:.2f} | "
+        f"Direction: **{direction}** | "
         f"Estimated movement: "
-        f"{predicted_return * 100:.2f}%"
+        f"**{predicted_return * 100:.2f}%**"
     )
