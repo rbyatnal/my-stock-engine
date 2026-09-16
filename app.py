@@ -4,11 +4,10 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LinearRegression
 
 st.set_page_config(layout="wide", page_title="Pro CANSLIM Engine")
 st.title("🦅 Professional CAN SLIM Growth Intelligence Terminal")
-st.caption("Asynchronous Random Forest ML Pipeline & Trend Continuation — Indian Market (NSE)")
+st.caption("Asynchronous Random Forest ML Pipeline with Core Metrics Scoreboard — Indian Market (NSE)")
 
 # --- STREAMLINED BACKEND DISCOVERY POOL ---
 CORE_POOL = [
@@ -20,6 +19,7 @@ CORE_POOL = [
 def professional_ml_pipeline(tickers):
     raw_metrics = []
     
+    # Pass 1: Gather Technical & Fundamental Vectors Natively
     for t in tickers:
         try:
             stock = yf.Ticker(t)
@@ -69,13 +69,7 @@ def professional_ml_pipeline(tickers):
             # Random Forest Dynamic Prediction Execution
             clf = RandomForestClassifier(n_estimators=40, max_depth=5, random_state=42)
             clf.fit(X_ml[:-5], y_ml[:-5])
-            
-            # Safe Extraction Matrix Array Parser Block
-            prob_higher_array = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))[0]
-            if len(prob_higher_array) == 2:
-                prob_higher = float(prob_higher_array[1] * 100)
-            else:
-                prob_higher = 50.0
+            prob_higher = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))[0][1] * 100
             
             raw_metrics.append({
                 "ticker": t, "hist": hist, "current_price": current_price, "pivot_price": pivot_price,
@@ -116,12 +110,12 @@ def professional_ml_pipeline(tickers):
             "ML Probability": f"{row['ml_prob']:.1f}%", "Status": status,
             "raw_pivot": row['pivot_price'], "raw_hist": row['hist'],
             "raw_master_score": row['Master Score'], "raw_eps": row['EPS Rating'], "raw_rs": row['Price Strength (RS)'],
-            "raw_group": group_rank, "raw_pivot_delta": row['pct_from_pivot'], "raw_ml_prob": row['ml_prob']
+            "raw_group": group_rank, "raw_pivot_delta": row['pct_from_pivot']
         }
         final_grid_data.append(rec)
         records_dictionary[t] = rec
         
-    df_sorted = pd.DataFrame(final_grid_data).sort_values(by="raw_ml_prob", ascending=False)
+    df_sorted = pd.DataFrame(final_grid_data).sort_values(by="ML Probability", ascending=False)
     return df_sorted, records_dictionary
 
 # Execute Analytics Processing Pipeline
@@ -141,21 +135,20 @@ search_query = st.text_input("Search or query any specific stock ticker directly
 active_selection = None
 if search_query:
     if search_query in master_records:
-        active_selection = str(search_query)
+        active_selection = search_query
     else:
         with st.spinner(f"Evaluating raw data architecture for {search_query}..."):
             _, extra_rec = professional_ml_pipeline([search_query])
             if search_query in extra_rec:
                 master_records.update(extra_rec)
-                active_selection = str(search_query)
+                active_selection = search_query
             else:
                 st.error("Invalid ticker code syntax. Ensure '.NS' is added at the end.")
 else:
-    if master_records:
-        # FIXED: Safely pulls only the raw string name of the first available key
-        active_selection = list(master_records.keys())[0]
+    if list(master_records.keys()):
+        active_selection = list(master_records.keys())[0]  # Safely pick first active row
 
-# --- SECTION 3: CORE VISUAL CARDS SCOREBOARD & USER INTEGRATED GRAPH ENGINE ---
+# --- SECTION 3: THE RESTORED CORE VISUAL CARDS SCOREBOARD ---
 if active_selection and active_selection in master_records:
     s = master_records[active_selection]
     
@@ -171,35 +164,11 @@ if active_selection and active_selection in master_records:
 
     st.info(f"🔴 **Calculated Risk Limits:** Technical Stop Loss Floor: ₹{s['raw_pivot']*0.93:.2f} (-7%) | Institutional Take Profit Objective: ₹{s['raw_pivot']*1.20:.2f} (+20%)")
 
-    # --- THE BACKEND PATTERN CONTINUATION ENGINE ---
+    # Interactive Graph View
     df_chart = s['raw_hist'].copy()
-    df_chart.index = pd.to_datetime(df_chart.index)
-    if df_chart.index.tz is not None:
-        df_chart.index = df_chart.index.tz_localize(None)
-    df_chart = df_chart.sort_index()
-
-    recent = df_chart.tail(20).copy()
-    recent['Day_Index'] = np.arange(len(recent))
-
-    X_train = recent[['Day_Index']].values
-    y_train = recent['Close'].values
-
-    vector_model = LinearRegression()
-    vector_model.fit(X_train, y_train)
-
-    current_close = float(df_chart['Close'].iloc[-1])
-
-    future_x = np.arange(len(recent), len(recent) + 6).reshape(-1, 1)
-    future_y_pred = vector_model.predict(future_x)
-
-    offset = current_close - future_y_pred[0]
-    future_y_aligned = future_y_pred + offset
-
-    last_date = df_chart.index[-1]
-    future_dates = pd.bdate_range(start=last_date + pd.Timedelta(days=1), periods=5)
-
-    projection_dates = [last_date] + list(future_dates)
-    projection_prices = [current_close] + list(future_y_aligned[1:])
-
-    # --- INTERACTIVE GRAPH LAYOUT RENDERING ---
     fig = go.Figure()
+    fig.add_trace(go.Candlestick(x=df_chart.index[-60:], open=df_chart['Open'].iloc[-60:], high=df_chart['High'].iloc[-60:], low=df_chart['Low'].iloc[-60:], close=df_chart['Close'].iloc[-60:], name="Price Candles"))
+    fig.add_trace(go.Scatter(x=df_chart.index[-60:], y=[s['raw_pivot']]*60, mode='lines', name='Breakout Pivot Line', line=dict(color='orange', width=2, dash='dot')))
+    
+    fig.update_layout(yaxis_title="Price (INR)", xaxis_rangeslider_visible=False, height=450, margin=dict(l=15, r=15, t=15, b=15))
+    st.plotly_chart(fig, use_container_width=True)
