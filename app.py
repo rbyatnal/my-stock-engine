@@ -70,9 +70,13 @@ def professional_ml_pipeline(tickers):
             clf = RandomForestClassifier(n_estimators=40, max_depth=5, random_state=42)
             clf.fit(X_ml[:-5], y_ml[:-5])
             
-            # Extract only the explicit upward movement probability value float
+            # SAFE EXTRACTION OF UPWARD PROBABILITY
             prob_higher_array = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))[0]
-            prob_higher = float(prob_higher_array[1] * 100) if len(prob_higher_array) > 1 else 50.0
+            # If the model only detects one class (e.g., all 0s or all 1s), handle it safely
+            if len(prob_higher_array) == 2:
+                prob_higher = float(prob_higher_array[1] * 100)
+            else:
+                prob_higher = 50.0
             
             raw_metrics.append({
                 "ticker": t, "hist": hist, "current_price": current_price, "pivot_price": pivot_price,
@@ -178,16 +182,15 @@ if active_selection and active_selection in master_records:
     
     # Project 5 Days forward from the very last candlestick's position
     future_x = np.array([[len(df_chart) + i] for i in range(0, 6)])
-    future_y = vector_model.predict(future_x)
+    future_y_pred = vector_model.predict(future_x)
     
-    # Anchor onto the true closing price of the final candle
-    future_y[0] = df_chart['Close'].iloc[-1]
+    # Force anchor alignment to avoid line disconnection gaps
+    current_close = float(df_chart['Close'].iloc[-1])
+    gap_offset = current_close - future_y_pred[0]
+    future_y_aligned = future_y_pred + gap_offset
     
     # Generate calendar projection mapping out future sessions
     future_timeline = [df_chart.index[-1]] + list(pd.date_range(start=df_chart.index[-1] + pd.Timedelta(days=1), periods=5))
 
     # Interactive Graph View
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=df_chart.index[-60:], open=df_chart['Open'].iloc[-60:], high=df_chart['High'].iloc[-60:], low=df_chart['Low'].iloc[-60:], close=df_chart['Close'].iloc[-60:], name="Price Candles"))
-    fig.add_trace(go.Scatter(x=df_chart.index[-60:], y=[s['raw_pivot']]*60, mode='lines', name='Breakout Pivot Line', line=dict(color='orange', width=2, dash='dot')))
-    
