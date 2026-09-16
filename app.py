@@ -1,4 +1,5 @@
 import hashlib
+import textwrap
 
 import streamlit as st
 import yfinance as yf
@@ -65,7 +66,7 @@ else:
 
 
 st.markdown(
-    f"""
+    textwrap.dedent(f"""
     <style>
 
     .stApp {{
@@ -242,7 +243,7 @@ st.markdown(
     }}
 
     </style>
-    """,
+    """),
     unsafe_allow_html=True
 )
 
@@ -296,7 +297,7 @@ cube_html = """
 """
 
 st.markdown(
-    f"""
+    textwrap.dedent(f"""
     <div class="topbar">
         <div>
             <div class="brand">🦅 CANSLIM Intelligence</div>
@@ -306,7 +307,7 @@ st.markdown(
         </div>
         {cube_html}
     </div>
-    """,
+    """),
     unsafe_allow_html=True
 )
 
@@ -809,7 +810,7 @@ hero_col1, hero_col2 = st.columns(
 with hero_col1:
 
     st.markdown(
-        f"""
+        textwrap.dedent(f"""
         <div>
             <div style="
                 font-size:12px;
@@ -835,20 +836,20 @@ with hero_col1:
                 Historical structure • ML pattern analysis • Technical metrics
             </div>
         </div>
-        """,
+        """),
         unsafe_allow_html=True
     )
 
 with hero_col2:
 
     st.markdown(
-        """
+        textwrap.dedent("""
         <div style="text-align:right">
             <span class="status-pill">
                 ● LIVE ANALYSIS
             </span>
         </div>
-        """,
+        """),
         unsafe_allow_html=True
     )
 
@@ -870,7 +871,7 @@ def metric_card(
 ):
 
     container.markdown(
-        f"""
+        textwrap.dedent(f"""
         <div class="metric-card">
 
             <div class="metric-label">
@@ -886,7 +887,7 @@ def metric_card(
             </div>
 
         </div>
-        """,
+        """),
         unsafe_allow_html=True
     )
 
