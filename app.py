@@ -1,3 +1,5 @@
+import textwrap
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -27,11 +29,21 @@ LABEL_COLOR = "#FFFFFF" if st.session_state.theme == "Black" else "#111111"
 
 # ============================================================
 # 2. GLOBAL CSS INJECTION (FORCE WHITE METRIC HEADERS)
+#
+# FIX: this whole block used to be indented 4 spaces inside the
+# f-string, e.g. "    <style>". Markdown treats 4+ leading spaces
+# as a literal indented code block, so none of this CSS was ever
+# actually applied — it just sat on the page as inert text. Wrapping
+# it in textwrap.dedent() so the first line starts at column 0 makes
+# it a real HTML/CSS block again. Also switched the outer metric
+# panel selector from the deprecated "metric-container" testid to
+# the current "stMetric" testid, and gave the label its own
+# uppercase/letter-spaced "header" look with real spacing so it
+# can't visually collide with the value underneath it.
 # ============================================================
 st.markdown(
-    f"""
+    textwrap.dedent(f"""
     <style>
-    /* Prevent top padding overlap with Streamlit toolbar */
     header[data-testid="stHeader"] {{
         background-color: transparent !important;
         z-index: 1;
@@ -44,8 +56,6 @@ st.markdown(
         background-color: {BG} !important;
         color: {TEXT} !important;
     }}
-
-    /* Header styling */
     .header-title {{
         font-size: 24px;
         font-weight: 800;
@@ -58,39 +68,42 @@ st.markdown(
         color: #A3B1C2 !important;
         margin-left: 6px;
     }}
-
-    /* Container Box Styling */
+    div[data-testid="stMetric"],
     div[data-testid="metric-container"] {{
         background-color: {PANEL} !important;
         border: 1px solid {BORDER} !important;
         border-radius: 8px;
-        padding: 12px 16px !important;
+        padding: 14px 16px !important;
         box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 6px !important;
     }}
-
-    /* FORCE METRIC CARD HEADER LABELS TO SOLID WHITE */
+    div[data-testid="stMetric"] label,
     div[data-testid="stMetricLabel"],
     div[data-testid="stMetricLabel"] *,
     div[data-testid="stMetricLabel"] p,
     div[data-testid="stMetricLabel"] label,
     div[data-testid="stMetricLabel"] span {{
-        color: #FFFFFF !important;
-        font-size: 14px !important;
-        font-weight: 700 !important;
+        color: {LABEL_COLOR} !important;
         opacity: 1 !important;
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.5px !important;
+        line-height: 1.4 !important;
+        margin: 0 0 2px 0 !important;
     }}
-
-    /* FORCE METRIC CARD VALUES TO SOLID WHITE */
     div[data-testid="stMetricValue"],
     div[data-testid="stMetricValue"] *,
     div[data-testid="stMetricValue"] div {{
-        color: #FFFFFF !important;
+        color: {LABEL_COLOR} !important;
+        opacity: 1 !important;
         font-size: 22px !important;
         font-weight: 800 !important;
-        opacity: 1 !important;
+        line-height: 1.3 !important;
+        margin-top: 0 !important;
     }}
-
-    /* Dropdown & Input styling */
     div[data-baseweb="select"] > div {{
         background-color: {PANEL} !important;
         color: {TEXT} !important;
@@ -101,7 +114,7 @@ st.markdown(
         font-weight: 600 !important;
     }}
     </style>
-    """,
+    """),
     unsafe_allow_html=True
 )
 
@@ -112,12 +125,12 @@ head_col1, head_col2 = st.columns([8, 2])
 
 with head_col1:
     st.markdown(
-        f"""
+        textwrap.dedent("""
         <div>
             <span class="header-title">Rakshits-Insights-Terminal</span>
             <span class="header-subtitle">(CAN SLIM Quantitative Intelligence)</span>
         </div>
-        """,
+        """),
         unsafe_allow_html=True
     )
 
@@ -195,15 +208,25 @@ def execute_quant_pipeline(tickers, interval, period):
             df_features["MA30"] = df_features["Close"].rolling(30).mean()
             df_features["Vol_MA10"] = df_features["Volume"].rolling(10).mean()
             df_features["Target"] = np.where(df_features["Close"].shift(-5) > df_features["Close"], 1, 0)
-            df_features.dropna(inplace=True)
 
             feature_cols = ["Close", "Volume", "Returns", "MA10", "MA30", "Vol_MA10"]
-            X_ml = df_features[feature_cols].values
-            y_ml = df_features["Target"].values
+
+            # FIX (same staleness bug as the other terminal): dropping
+            # rows with a NaN future Target *before* picking "today's"
+            # row meant the last ~5-10 sessions were silently discarded
+            # and the model always predicted off stale data. Train only
+            # on rows with a known target; predict on the true latest row.
+            df_valid_features = df_features.dropna(subset=feature_cols)
+            train_df = df_valid_features.iloc[:-5]
+
+            X_ml = train_df[feature_cols].values
+            y_ml = train_df["Target"].values
 
             clf = RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)
-            clf.fit(X_ml[:-5], y_ml[:-5])
-            probabilities = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))
+            clf.fit(X_ml, y_ml)
+
+            current_features = df_valid_features[feature_cols].iloc[-1].values.reshape(1, -1)
+            probabilities = clf.predict_proba(current_features)
             prob_higher = probabilities[0][1] * 100 if probabilities.shape[1] == 2 else 50.0
 
             raw_metrics.append({
