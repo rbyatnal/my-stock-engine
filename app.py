@@ -4,10 +4,11 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LinearRegression
 
 st.set_page_config(layout="wide", page_title="Pro CANSLIM Engine")
 st.title("🦅 Professional CAN SLIM Growth Intelligence Terminal")
-st.caption("Asynchronous Random Forest ML Pipeline with Core Metrics Scoreboard — Indian Market (NSE)")
+st.caption("Asynchronous Random Forest ML Pipeline & Trend Continuation — Indian Market (NSE)")
 
 # --- STREAMLINED BACKEND DISCOVERY POOL ---
 CORE_POOL = [
@@ -19,7 +20,6 @@ CORE_POOL = [
 def professional_ml_pipeline(tickers):
     raw_metrics = []
     
-    # Pass 1: Gather Technical & Fundamental Vectors Natively
     for t in tickers:
         try:
             stock = yf.Ticker(t)
@@ -69,7 +69,7 @@ def professional_ml_pipeline(tickers):
             # Random Forest Dynamic Prediction Execution
             clf = RandomForestClassifier(n_estimators=40, max_depth=5, random_state=42)
             clf.fit(X_ml[:-5], y_ml[:-5])
-            prob_higher = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))[0][1] * 100
+            prob_higher = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]])) * 100
             
             raw_metrics.append({
                 "ticker": t, "hist": hist, "current_price": current_price, "pivot_price": pivot_price,
@@ -146,9 +146,9 @@ if search_query:
                 st.error("Invalid ticker code syntax. Ensure '.NS' is added at the end.")
 else:
     if list(master_records.keys()):
-        active_selection = list(master_records.keys())[0]  # Safely pick first active row
+        active_selection = list(master_records.keys())
 
-# --- SECTION 3: THE RESTORED CORE VISUAL CARDS SCOREBOARD ---
+# --- SECTION 3: CORE VISUAL CARDS SCOREBOARD & INTEGRATED TREND CONTINUUM ---
 if active_selection and active_selection in master_records:
     s = master_records[active_selection]
     
@@ -164,11 +164,31 @@ if active_selection and active_selection in master_records:
 
     st.info(f"🔴 **Calculated Risk Limits:** Technical Stop Loss Floor: ₹{s['raw_pivot']*0.93:.2f} (-7%) | Institutional Take Profit Objective: ₹{s['raw_pivot']*1.20:.2f} (+20%)")
 
-    # Interactive Graph View
+    # --- THE BACKEND PATTERN CONTINUATION ENGINE ---
     df_chart = s['raw_hist'].copy()
+    
+    # Isolate last 20 candles to extract immediate speed vector
+    df_chart['Day_Index'] = np.arange(len(df_chart))
+    X_train = df_chart[['Day_Index']].values[-20:]
+    y_train = df_chart['Close'].values[-20:]
+    
+    vector_model = LinearRegression().fit(X_train, y_train)
+    
+    # Project 5 Days forward from the very last candlestick's position
+    future_x = np.array([[len(df_chart) + i] for i in range(0, 6)]) # Start at 0 to connect seamlessly to the last candle
+    future_y = vector_model.predict(future_x)
+    
+    # Overwrite index 0 to seamlessly anchor onto the true closing price of the final candle
+    future_y[0] = df_chart['Close'].iloc[-1]
+    
+    # Generate calendar projection mapping out future sessions
+    future_timeline = [df_chart.index[-1]] + list(pd.date_range(start=df_chart.index[-1] + pd.Timedelta(days=1), periods=5))
+
+    # Interactive Graph View
     fig = go.Figure()
+    # Candlestick Array
     fig.add_trace(go.Candlestick(x=df_chart.index[-60:], open=df_chart['Open'].iloc[-60:], high=df_chart['High'].iloc[-60:], low=df_chart['Low'].iloc[-60:], close=df_chart['Close'].iloc[-60:], name="Price Candles"))
+    # Flat Pivot Resistance High
     fig.add_trace(go.Scatter(x=df_chart.index[-60:], y=[s['raw_pivot']]*60, mode='lines', name='Breakout Pivot Line', line=dict(color='orange', width=2, dash='dot')))
     
-    fig.update_layout(yaxis_title="Price (INR)", xaxis_rangeslider_visible=False, height=450, margin=dict(l=15, r=15, t=15, b=15))
-    st.plotly_chart(fig, use_container_width=True)
+    # HIGH-CONTRAST SEAMLESS ML DIRECTION VECTOR LINE
