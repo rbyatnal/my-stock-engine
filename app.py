@@ -70,12 +70,15 @@ def professional_ml_pipeline(tickers):
             clf = RandomForestClassifier(n_estimators=40, max_depth=5, random_state=42)
             clf.fit(X_ml[:-5], y_ml[:-5])
             
-            # SAFE EXTRACTION OF UPWARD PROBABILITY
-            prob_higher_array = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))[0]
-            # If the model only detects one class (e.g., all 0s or all 1s), handle it safely
-            if len(prob_higher_array) == 2:
-                prob_higher = float(prob_higher_array[1] * 100)
-            else:
+            # SAFE EXTRACTION OF MATRIX PROBABILITY VALUES
+            prob_higher_array = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))
+            try:
+                # Safely parse nested shape vectors whether multi-class or flat arrays are output
+                if prob_higher_array.ndim > 1 and prob_higher_array.shape[1] > 1:
+                    prob_higher = float(prob_higher_array[0][1] * 100)
+                else:
+                    prob_higher = float(prob_higher_array[0][0] * 100)
+            except:
                 prob_higher = 50.0
             
             raw_metrics.append({
@@ -153,9 +156,9 @@ if search_query:
                 st.error("Invalid ticker code syntax. Ensure '.NS' is added at the end.")
 else:
     if list(master_records.keys()):
-        active_selection = list(master_records.keys())[0]
+        active_selection = list(master_records.keys())
 
-# --- SECTION 3: THE RESTORED CORE VISUAL CARDS SCOREBOARD & INTEGRATED TREND CONTINUUM ---
+# --- SECTION 3: CORE VISUAL CARDS SCOREBOARD & INTEGRATED TREND CONTINUUM ---
 if active_selection and active_selection in master_records:
     s = master_records[active_selection]
     
@@ -184,7 +187,7 @@ if active_selection and active_selection in master_records:
     future_x = np.array([[len(df_chart) + i] for i in range(0, 6)])
     future_y_pred = vector_model.predict(future_x)
     
-    # Force anchor alignment to avoid line disconnection gaps
+    # Force anchor alignment to connect flawlessly to the final candle
     current_close = float(df_chart['Close'].iloc[-1])
     gap_offset = current_close - future_y_pred[0]
     future_y_aligned = future_y_pred + gap_offset
