@@ -70,7 +70,7 @@ def professional_ml_pipeline(tickers):
             clf = RandomForestClassifier(n_estimators=40, max_depth=5, random_state=42)
             clf.fit(X_ml[:-5], y_ml[:-5])
             
-            # SAFE EXTRACTION OF UPWARD PROBABILITY
+            # Safe Extraction Matrix Array Parser Block
             prob_higher_array = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))[0]
             if len(prob_higher_array) == 2:
                 prob_higher = float(prob_higher_array[1] * 100)
@@ -138,7 +138,6 @@ st.markdown("---")
 st.subheader("🔎 2. Targeted Intelligence Search Unit")
 search_query = st.text_input("Search or query any specific stock ticker directly (e.g. SYRMA.NS, HAL.NS, ZOMATO.NS):", "").strip().upper()
 
-# FIX: Strict string verification fallback rules to ensure unbreakable key matching
 active_selection = None
 if search_query:
     if search_query in master_records:
@@ -153,9 +152,10 @@ if search_query:
                 st.error("Invalid ticker code syntax. Ensure '.NS' is added at the end.")
 else:
     if list(master_records.keys()):
-        active_selection = str(list(master_records.keys())[0]) # FIXED: Safely pull only the raw string name of the first index
+        # Fixed: Explicitly targets the very first raw string string key in the master dictionary
+        active_selection = str(list(master_records.keys())[0])
 
-# --- SECTION 3: CORE VISUAL CARDS SCOREBOARD & INTEGRATED TREND CONTINUUM ---
+# --- SECTION 3: CORE VISUAL CARDS SCOREBOARD & USER INTEGRATED GRAPH ENGINE ---
 if active_selection and active_selection in master_records:
     s = master_records[active_selection]
     
@@ -171,26 +171,35 @@ if active_selection and active_selection in master_records:
 
     st.info(f"🔴 **Calculated Risk Limits:** Technical Stop Loss Floor: ₹{s['raw_pivot']*0.93:.2f} (-7%) | Institutional Take Profit Objective: ₹{s['raw_pivot']*1.20:.2f} (+20%)")
 
-    # --- THE BACKEND PATTERN CONTINUATION ENGINE ---
+    # --- YOUR INTEGRATED BACKEND PATTERN CONTINUATION ENGINE ---
     df_chart = s['raw_hist'].copy()
-    
-    df_chart['Day_Index'] = np.arange(len(df_chart))
-    X_train = df_chart[['Day_Index']].values[-20:]
-    y_train = df_chart['Close'].values[-20:]
-    
-    vector_model = LinearRegression().fit(X_train, y_train)
-    
-    # Project 5 Days forward from the very last candlestick's position
-    future_x = np.array([[len(df_chart) + i] for i in range(0, 6)])
-    future_y_pred = vector_model.predict(future_x)
-    
-    # Force anchor alignment to connect flawlessly to the final candle
-    current_close = float(df_chart['Close'].iloc[-1])
-    gap_offset = current_close - future_y_pred[0]
-    future_y_aligned = future_y_pred + gap_offset
-    
-    # Generate calendar projection mapping out future sessions
-    future_timeline = [df_chart.index[-1]] + list(pd.date_range(start=df_chart.index[-1] + pd.Timedelta(days=1), periods=5))
+    df_chart.index = pd.to_datetime(df_chart.index)
+    if df_chart.index.tz is not None:
+        df_chart.index = df_chart.index.tz_localize(None)
+    df_chart = df_chart.sort_index()
 
-    # Interactive Graph View
+    recent = df_chart.tail(20).copy()
+    recent['Day_Index'] = np.arange(len(recent))
+
+    X_train = recent[['Day_Index']].values
+    y_train = recent['Close'].values
+
+    vector_model = LinearRegression()
+    vector_model.fit(X_train, y_train)
+
+    current_close = float(df_chart['Close'].iloc[-1])
+
+    future_x = np.arange(len(recent), len(recent) + 6).reshape(-1, 1)
+    future_y_pred = vector_model.predict(future_x)
+
+    offset = current_close - future_y_pred[0]
+    future_y_aligned = future_y_pred + offset
+
+    last_date = df_chart.index[-1]
+    future_dates = pd.bdate_range(start=last_date + pd.Timedelta(days=1), periods=5)
+
+    projection_dates = [last_date] + list(future_dates)
+    projection_prices = [current_close] + list(future_y_aligned[1:])
+
+    # --- INTERACTIVE GRAPH LAYOUT RENDERING ---
     fig = go.Figure()
