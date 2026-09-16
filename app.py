@@ -70,10 +70,10 @@ def professional_ml_pipeline(tickers):
             clf = RandomForestClassifier(n_estimators=40, max_depth=5, random_state=42)
             clf.fit(X_ml[:-5], y_ml[:-5])
             
-            # FIXED EXTRACTION LINE: Target matrix column explicitly to prevent float crashes
-            prob_higher_array = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))
-            if prob_higher_array.shape[1] == 2:
-                prob_higher = float(prob_higher_array[0][1] * 100)
+            # SAFE EXTRACTION OF UPWARD PROBABILITY
+            prob_higher_array = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))[0]
+            if len(prob_higher_array) == 2:
+                prob_higher = float(prob_higher_array[1] * 100)
             else:
                 prob_higher = 50.0
             
@@ -138,21 +138,22 @@ st.markdown("---")
 st.subheader("🔎 2. Targeted Intelligence Search Unit")
 search_query = st.text_input("Search or query any specific stock ticker directly (e.g. SYRMA.NS, HAL.NS, ZOMATO.NS):", "").strip().upper()
 
+# FIX: Strict string verification fallback rules to ensure unbreakable key matching
 active_selection = None
 if search_query:
     if search_query in master_records:
-        active_selection = search_query
+        active_selection = str(search_query)
     else:
         with st.spinner(f"Evaluating raw data architecture for {search_query}..."):
             _, extra_rec = professional_ml_pipeline([search_query])
             if search_query in extra_rec:
                 master_records.update(extra_rec)
-                active_selection = search_query
+                active_selection = str(search_query)
             else:
                 st.error("Invalid ticker code syntax. Ensure '.NS' is added at the end.")
 else:
     if list(master_records.keys()):
-        active_selection = list(master_records.keys())
+        active_selection = str(list(master_records.keys())[0]) # FIXED: Safely pull only the raw string name of the first index
 
 # --- SECTION 3: CORE VISUAL CARDS SCOREBOARD & INTEGRATED TREND CONTINUUM ---
 if active_selection and active_selection in master_records:
@@ -185,7 +186,7 @@ if active_selection and active_selection in master_records:
     
     # Force anchor alignment to connect flawlessly to the final candle
     current_close = float(df_chart['Close'].iloc[-1])
-    gap_offset = current_close - future_y_pred
+    gap_offset = current_close - future_y_pred[0]
     future_y_aligned = future_y_pred + gap_offset
     
     # Generate calendar projection mapping out future sessions
@@ -193,4 +194,3 @@ if active_selection and active_selection in master_records:
 
     # Interactive Graph View
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=df_chart.index[-60:], open=df_chart['Open'].iloc[-60:], high=df_chart['High'].iloc[-60:], low=df_chart['Low'].iloc[-60:], close=df_chart['Close'].iloc[-60:], name="Price Candles"))
