@@ -18,26 +18,25 @@ st.set_page_config(
 if "theme" not in st.session_state:
     st.session_state.theme = "Black"
 
-# Dynamic styling variables
+# Dynamic theme colors
 BG = "#0E1117" if st.session_state.theme == "Black" else "#FFFFFF"
 TEXT = "#FFFFFF" if st.session_state.theme == "Black" else "#111111"
 PANEL = "#161B22" if st.session_state.theme == "Black" else "#F8F9FA"
 BORDER = "#30363D" if st.session_state.theme == "Black" else "#E0E0E0"
-LABEL_COLOR = "#9A9EA6" if st.session_state.theme == "Black" else "#555555"
 
 # ============================================================
-# 2. GLOBAL CSS INJECTION
+# 2. GLOBAL CSS INJECTION & HIGH-CONTRAST METRICS
 # ============================================================
 st.markdown(
     f"""
     <style>
-    /* Prevent top padding overlap with Streamlit toolbar */
+    /* Unclip viewport & hide default header overlay */
     header[data-testid="stHeader"] {{
         background-color: transparent !important;
         z-index: 1;
     }}
     .block-container {{
-        padding-top: 3rem !important;
+        padding-top: 3.5rem !important;
         padding-bottom: 2rem !important;
     }}
     .stApp {{
@@ -45,7 +44,7 @@ st.markdown(
         color: {TEXT} !important;
     }}
 
-    /* Header styling */
+    /* Title Styling */
     .header-title {{
         font-size: 24px;
         font-weight: 800;
@@ -55,29 +54,42 @@ st.markdown(
     .header-subtitle {{
         font-size: 13px;
         font-weight: 400;
-        color: {LABEL_COLOR} !important;
-        margin-left: 6px;
+        color: #00E5FF !important;
+        margin-left: 8px;
     }}
 
-    /* Fix Metrics Visibility in Dark Mode */
+    /* CARD CONTAINER STYLING */
     div[data-testid="metric-container"] {{
         background-color: {PANEL} !important;
         border: 1px solid {BORDER} !important;
         border-radius: 8px;
-        padding: 10px 14px !important;
-    }}
-    div[data-testid="stMetricLabel"] > label, div[data-testid="stMetricLabel"] {{
-        color: {LABEL_COLOR} !important;
-        font-size: 13px !important;
-        font-weight: 600 !important;
-    }}
-    div[data-testid="stMetricValue"] {{
-        color: {TEXT} !important;
-        font-size: 20px !important;
-        font-weight: 700 !important;
+        padding: 12px 16px !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }}
 
-    /* Input & Dropdown Styling */
+    /* TARGET ALL METRIC CARD HEADER NODES FOR HIGH VISIBILITY */
+    div[data-testid="stMetricLabel"],
+    div[data-testid="stMetricLabel"] *,
+    div[data-testid="stMetricLabel"] p,
+    div[data-testid="stMetricLabel"] label,
+    div[data-testid="stMetricLabel"] span {{
+        color: #00E5FF !important; /* Bright Cyan Label */
+        font-size: 14px !important;
+        font-weight: 700 !important;
+        opacity: 1 !important;
+    }}
+
+    /* TARGET ALL METRIC VALUE NODES */
+    div[data-testid="stMetricValue"],
+    div[data-testid="stMetricValue"] *,
+    div[data-testid="stMetricValue"] div {{
+        color: #FFFFFF !important;
+        font-size: 22px !important;
+        font-weight: 800 !important;
+        opacity: 1 !important;
+    }}
+
+    /* Selectbox & Input Contrast */
     div[data-baseweb="select"] > div {{
         background-color: {PANEL} !important;
         color: {TEXT} !important;
@@ -99,7 +111,7 @@ head_col1, head_col2 = st.columns([8, 2])
 
 with head_col1:
     st.markdown(
-        f"""
+        """
         <div>
             <span class="header-title">Rakshits-Insights-Terminal</span>
             <span class="header-subtitle">(CAN SLIM Quantitative Intelligence)</span>
@@ -235,7 +247,7 @@ def execute_quant_pipeline(tickers, interval, period):
 with st.spinner("Fetching market feed & computing metrics..."):
     df_ranking, master_records = execute_quant_pipeline(DYNAMIC_UNIVERSE, selected_config["interval"], selected_config["period"])
 
-# Display Ranking
+# Display Ranking Table
 st.subheader(f"📊 Top Ranked Candidates — {timeframe}")
 if not df_ranking.empty:
     st.dataframe(
