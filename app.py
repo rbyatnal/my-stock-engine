@@ -178,6 +178,33 @@ st.markdown(
         font-weight: 800;
     }}
 
+    /* Native Streamlit buttons — without this, st.button() falls
+       back to Streamlit's default light-mode style: a washed-out
+       white box that's nearly unreadable against a dark theme. */
+    .stButton > button {{
+        background: {PANEL} !important;
+        color: {TEXT} !important;
+        border: 1px solid {BORDER} !important;
+        border-radius: 10px !important;
+        font-weight: 700 !important;
+    }}
+
+    .stButton > button:hover {{
+        border-color: {ACCENT} !important;
+        color: {ACCENT} !important;
+        background: {PANEL2} !important;
+    }}
+
+    .stButton > button:active,
+    .stButton > button:focus:not(:hover) {{
+        color: {TEXT} !important;
+        border-color: {ACCENT} !important;
+    }}
+
+    .stButton > button p {{
+        color: inherit !important;
+    }}
+
     /* 3D RUBIK CUBE */
 
     .cube-container {{
