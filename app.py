@@ -526,26 +526,52 @@ def professional_ml_pipeline(tickers):
 
             # ------------------------------------------------
             # A — ANNUAL EPS GROWTH, computed from yfinance's own
-            # income statement endpoint (get_income_stmt), not the
-            # single-figure earningsGrowth field used for "C". This
-            # was previously marked as unavailable outright — it
-            # isn't; it just needed the right yfinance call. Falls
-            # back to None (shown as N/A) only when this specific
-            # ticker's statement genuinely lacks enough EPS history,
-            # not as a blanket assumption for all NSE tickers.
+            # income statement. SMR's Sales growth and Net Margin
+            # come from the same statement (one fetch, three metrics).
             #
-            # SMR — Sales growth + Margins + ROE (MarketSmith's own
-            # SMR Rating). Sales growth and Net Margin come from this
-            # same income statement, so no extra API call is needed.
+            # FIX: the fetch used only stock.get_income_stmt(), which
+            # doesn't exist on older yfinance versions — on those,
+            # this raised AttributeError, was silently swallowed by
+            # the except block below, and always produced N/A
+            # regardless of whether real data existed. Now tries
+            # three call paths in order (newest to oldest yfinance
+            # API) and records *why* it ended up empty, so N/A in the
+            # UI says whether it's a genuine data gap or a fetch
+            # failure instead of looking identical either way.
             # ------------------------------------------------
             annual_eps_cagr = None
             sales_growth_cagr = None
             net_margin_latest = None
+            fundamentals_error = None
+
+            income_stmt = None
 
             try:
-                income_stmt = stock.get_income_stmt(freq="yearly")
+                if hasattr(stock, "get_income_stmt"):
+                    income_stmt = stock.get_income_stmt(freq="yearly")
+                elif hasattr(stock, "income_stmt"):
+                    income_stmt = stock.income_stmt
+                elif hasattr(stock, "financials"):
+                    income_stmt = stock.financials
+                else:
+                    fundamentals_error = "yfinance version has no income statement API"
 
-                if income_stmt is not None and not income_stmt.empty:
+            except Exception as _fund_exc:
+                fundamentals_error = (
+                    f"fetch failed ({type(_fund_exc).__name__})"
+                )
+                income_stmt = None
+
+            if income_stmt is None or income_stmt.empty:
+
+                if fundamentals_error is None:
+                    fundamentals_error = (
+                        "no income statement data for this ticker"
+                    )
+
+            else:
+
+                try:
 
                     eps_row = None
 
@@ -569,6 +595,16 @@ def professional_ml_pipeline(tickers):
                                 (eps_latest / eps_oldest)
                                 ** (1 / years_span)
                             ) - 1
+                        else:
+                            fundamentals_error = (
+                                "EPS history present but not usable "
+                                "(zero/negative base year)"
+                            )
+
+                    else:
+                        fundamentals_error = (
+                            "no Diluted/Basic EPS row in statement"
+                        )
 
                     if "Total Revenue" in income_stmt.index:
 
@@ -622,10 +658,16 @@ def professional_ml_pipeline(tickers):
                                     / latest_revenue
                                 )
 
-            except Exception:
-                annual_eps_cagr = None
-                sales_growth_cagr = None
-                net_margin_latest = None
+                except Exception as _parse_exc:
+                    fundamentals_error = (
+                        f"parse failed ({type(_parse_exc).__name__})"
+                    )
+                    annual_eps_cagr = None
+                    sales_growth_cagr = None
+                    net_margin_latest = None
+
+            if annual_eps_cagr is not None:
+                fundamentals_error = None
 
             high_52w = float(cp.max())
             low_52w = float(cp.min())
@@ -841,6 +883,7 @@ def professional_ml_pipeline(tickers):
                 "roe": roe_raw,
                 "debt_equity": debt_equity_raw,
                 "annual_eps_cagr": annual_eps_cagr,
+                "fundamentals_error": fundamentals_error,
                 "sales_growth_cagr": sales_growth_cagr,
                 "net_margin": net_margin_latest,
                 "trend_template_pass": trend_template_pass,
@@ -1056,6 +1099,9 @@ def professional_ml_pipeline(tickers):
             "annual_eps_cagr":
                 row["annual_eps_cagr"],
 
+            "fundamentals_error":
+                row["fundamentals_error"],
+
             "raw_price":
                 row["current_price"],
 
@@ -1198,7 +1244,7 @@ def evaluate_qualification(rec, market_info):
     values["A (Annual earnings)"] = (
         f"{annual_cagr * 100:.1f}% CAGR"
         if _is_valid(annual_cagr)
-        else "N/A (insufficient EPS history for this ticker)"
+        else f"N/A ({rec.get('fundamentals_error') or 'unknown reason'})"
     )
 
     # N — proximity to 52-week high (the quantifiable half of "New")
