@@ -436,6 +436,7 @@ def professional_ml_pipeline(tickers):
                 debt_equity_raw = None
 
             high_52w = float(cp.max())
+            low_52w = float(cp.min())
 
             pct_off_high = (
                 (current_price - high_52w)
@@ -450,6 +451,92 @@ def professional_ml_pipeline(tickers):
                 (current_price - pivot_price)
                 / pivot_price
             ) * 100
+
+            # ------------------------------------------------
+            # MINERVINI TREND TEMPLATE — 7 numeric, published
+            # criteria (an 8th, RS >= 70, is tracked separately
+            # as "L"). Source: Minervini's "Think & Trade Like a
+            # Champion", cross-checked against several independent
+            # screener implementations of the same rules.
+            # ------------------------------------------------
+
+            ma50_series = cp.rolling(50).mean()
+            ma150_series = cp.rolling(150).mean()
+            ma200_series = cp.rolling(200).mean()
+
+            ma50 = float(ma50_series.iloc[-1])
+            ma150 = float(ma150_series.iloc[-1])
+            ma200 = float(ma200_series.iloc[-1])
+
+            # "trending up for at least 1 month" ~ 21 trading days
+            ma200_prior = (
+                float(ma200_series.iloc[-21])
+                if len(ma200_series) >= 21
+                and not pd.isna(ma200_series.iloc[-21])
+                else None
+            )
+
+            trend_template_checks = {
+                "price_above_ma150_ma200": (
+                    current_price > ma150
+                    and current_price > ma200
+                ),
+                "ma150_above_ma200": ma150 > ma200,
+                "ma200_rising_1mo": (
+                    ma200_prior is not None
+                    and ma200 > ma200_prior
+                ),
+                "ma50_above_ma150_ma200": (
+                    ma50 > ma150
+                    and ma50 > ma200
+                ),
+                "price_above_ma50": current_price > ma50,
+                "price_30pct_above_low": (
+                    current_price >= 1.30 * low_52w
+                ),
+                "price_within_25pct_of_high": (
+                    pct_off_high >= -25.0
+                )
+            }
+
+            trend_template_score = sum(
+                trend_template_checks.values()
+            )
+
+            trend_template_pass = (
+                trend_template_score == 7
+            )
+
+            # ------------------------------------------------
+            # RSI / MACD — same math as the per-stock chart later
+            # in the file, computed here too so every stock in the
+            # qualification screen (not just the selected one) can
+            # actually be gated on them.
+            # ------------------------------------------------
+
+            _delta = cp.diff()
+            _gain = _delta.clip(lower=0)
+            _loss = -_delta.clip(upper=0)
+            _avg_gain = _gain.rolling(14).mean()
+            _avg_loss = _loss.rolling(14).mean()
+            _rs = _avg_gain / (_avg_loss + 1e-10)
+            rsi_series = 100 - (100 / (1 + _rs))
+            rsi_latest = float(rsi_series.iloc[-1])
+
+            _ema12 = cp.ewm(span=12, adjust=False).mean()
+            _ema26 = cp.ewm(span=26, adjust=False).mean()
+            macd_series = _ema12 - _ema26
+            macd_signal_series = macd_series.ewm(span=9, adjust=False).mean()
+
+            macd_bullish = bool(
+                macd_series.iloc[-1] > macd_signal_series.iloc[-1]
+            )
+
+            # Liquidity — ChartMill's published CANSLIM screen uses
+            # a 100k-shares/day average as its minimum liquidity bar
+            avg_volume_20 = float(
+                hist["Volume"].tail(20).mean()
+            )
 
             # ------------------------------------------------
             # ML feature creation
@@ -560,7 +647,12 @@ def professional_ml_pipeline(tickers):
                 "pct_off_high": pct_off_high,
                 "ml_prob": prob_higher,
                 "roe": roe_raw,
-                "debt_equity": debt_equity_raw
+                "debt_equity": debt_equity_raw,
+                "trend_template_pass": trend_template_pass,
+                "trend_template_score": trend_template_score,
+                "rsi_latest": rsi_latest,
+                "macd_bullish": macd_bullish,
+                "avg_volume_20": avg_volume_20
 
             })
 
@@ -697,7 +789,22 @@ def professional_ml_pipeline(tickers):
                 row["current_price"],
 
             "raw_eps_growth":
-                row["raw_eps"]
+                row["raw_eps"],
+
+            "trend_template_pass":
+                row["trend_template_pass"],
+
+            "trend_template_score":
+                row["trend_template_score"],
+
+            "rsi_latest":
+                row["rsi_latest"],
+
+            "macd_bullish":
+                row["macd_bullish"],
+
+            "avg_volume_20":
+                row["avg_volume_20"]
 
         }
 
@@ -818,6 +925,39 @@ def evaluate_qualification(rec, market_info):
     checks["ROE >= 17%"] = (
         (roe * 100) >= 17.0
         if roe is not None
+        else None
+    )
+
+    # Trend Template (Minervini) — 7 published numeric criteria,
+    # all must pass for a confirmed Stage-2 uptrend
+    checks["Trend Template (Minervini, 7 criteria)"] = (
+        rec["trend_template_pass"]
+    )
+
+    # RSI — practitioner heuristic, NOT a named standard the way
+    # Minervini's or IBD's numbers are: avoid stocks either broken
+    # down (RSI < 40) or dangerously extended (RSI > 80)
+    rsi = rec["rsi_latest"]
+    checks["RSI healthy (40-80, heuristic)"] = (
+        40.0 <= rsi <= 80.0
+        if rsi is not None and not (
+            isinstance(rsi, float) and pd.isna(rsi)
+        )
+        else None
+    )
+
+    # MACD — momentum confirmation, also a heuristic, not a
+    # CANSLIM/Minervini-named rule
+    checks["MACD bullish (heuristic)"] = (
+        rec["macd_bullish"]
+    )
+
+    # Liquidity — ChartMill's published CANSLIM screen config uses
+    # a 100k avg-daily-volume floor
+    avg_vol = rec["avg_volume_20"]
+    checks["Liquidity (avg vol >= 100k)"] = (
+        avg_vol >= 100_000
+        if avg_vol is not None
         else None
     )
 
@@ -1110,6 +1250,7 @@ for ticker, rec in master_records.items():
     qualification_rows.append({
         "Ticker": ticker,
         "Status": status,
+        "Trend Score": f"{rec['trend_template_score']}/7",
         **{k: fmt(v) for k, v in checks.items()}
     })
 
