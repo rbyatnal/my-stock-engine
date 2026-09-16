@@ -151,9 +151,9 @@ if search_query:
             else:
                 st.error("Invalid ticker code syntax. Ensure '.NS' is added at the end.")
 else:
-    if list(master_records.keys()):
-        # Fixed: Explicitly targets the very first raw string string key in the master dictionary
-        active_selection = str(list(master_records.keys())[0])
+    if master_records:
+        # FIXED: Safely pulls only the raw string name of the first available key
+        active_selection = list(master_records.keys())[0]
 
 # --- SECTION 3: CORE VISUAL CARDS SCOREBOARD & USER INTEGRATED GRAPH ENGINE ---
 if active_selection and active_selection in master_records:
@@ -171,7 +171,7 @@ if active_selection and active_selection in master_records:
 
     st.info(f"🔴 **Calculated Risk Limits:** Technical Stop Loss Floor: ₹{s['raw_pivot']*0.93:.2f} (-7%) | Institutional Take Profit Objective: ₹{s['raw_pivot']*1.20:.2f} (+20%)")
 
-    # --- YOUR INTEGRATED BACKEND PATTERN CONTINUATION ENGINE ---
+    # --- THE BACKEND PATTERN CONTINUATION ENGINE ---
     df_chart = s['raw_hist'].copy()
     df_chart.index = pd.to_datetime(df_chart.index)
     if df_chart.index.tz is not None:
