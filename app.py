@@ -524,6 +524,109 @@ def professional_ml_pipeline(tickers):
                 roe_raw = None
                 debt_equity_raw = None
 
+            # ------------------------------------------------
+            # A — ANNUAL EPS GROWTH, computed from yfinance's own
+            # income statement endpoint (get_income_stmt), not the
+            # single-figure earningsGrowth field used for "C". This
+            # was previously marked as unavailable outright — it
+            # isn't; it just needed the right yfinance call. Falls
+            # back to None (shown as N/A) only when this specific
+            # ticker's statement genuinely lacks enough EPS history,
+            # not as a blanket assumption for all NSE tickers.
+            #
+            # SMR — Sales growth + Margins + ROE (MarketSmith's own
+            # SMR Rating). Sales growth and Net Margin come from this
+            # same income statement, so no extra API call is needed.
+            # ------------------------------------------------
+            annual_eps_cagr = None
+            sales_growth_cagr = None
+            net_margin_latest = None
+
+            try:
+                income_stmt = stock.get_income_stmt(freq="yearly")
+
+                if income_stmt is not None and not income_stmt.empty:
+
+                    eps_row = None
+
+                    for row_name in ("Diluted EPS", "Basic EPS"):
+                        if row_name in income_stmt.index:
+                            candidate = income_stmt.loc[row_name].dropna()
+                            if len(candidate) >= 2:
+                                eps_row = candidate
+                                break
+
+                    if eps_row is not None:
+
+                        eps_row = eps_row.sort_index()
+
+                        eps_oldest = float(eps_row.iloc[0])
+                        eps_latest = float(eps_row.iloc[-1])
+                        years_span = len(eps_row) - 1
+
+                        if eps_oldest > 0 and years_span > 0:
+                            annual_eps_cagr = (
+                                (eps_latest / eps_oldest)
+                                ** (1 / years_span)
+                            ) - 1
+
+                    if "Total Revenue" in income_stmt.index:
+
+                        revenue_row = (
+                            income_stmt.loc["Total Revenue"]
+                            .dropna()
+                            .sort_index()
+                        )
+
+                        if len(revenue_row) >= 2:
+
+                            rev_oldest = float(revenue_row.iloc[0])
+                            rev_latest = float(revenue_row.iloc[-1])
+                            rev_years_span = len(revenue_row) - 1
+
+                            if rev_oldest > 0 and rev_years_span > 0:
+                                sales_growth_cagr = (
+                                    (rev_latest / rev_oldest)
+                                    ** (1 / rev_years_span)
+                                ) - 1
+
+                        net_income_row = None
+
+                        for ni_name in (
+                            "Net Income",
+                            "Net Income Common Stockholders"
+                        ):
+                            if ni_name in income_stmt.index:
+                                candidate = (
+                                    income_stmt.loc[ni_name]
+                                    .dropna()
+                                    .sort_index()
+                                )
+                                if len(candidate) >= 1:
+                                    net_income_row = candidate
+                                    break
+
+                        if (
+                            net_income_row is not None
+                            and len(revenue_row) >= 1
+                        ):
+                            latest_revenue = float(
+                                revenue_row.sort_index().iloc[-1]
+                            )
+                            latest_net_income = float(
+                                net_income_row.iloc[-1]
+                            )
+                            if latest_revenue != 0:
+                                net_margin_latest = (
+                                    latest_net_income
+                                    / latest_revenue
+                                )
+
+            except Exception:
+                annual_eps_cagr = None
+                sales_growth_cagr = None
+                net_margin_latest = None
+
             high_52w = float(cp.max())
             low_52w = float(cp.min())
 
@@ -737,6 +840,9 @@ def professional_ml_pipeline(tickers):
                 "ml_prob": prob_higher,
                 "roe": roe_raw,
                 "debt_equity": debt_equity_raw,
+                "annual_eps_cagr": annual_eps_cagr,
+                "sales_growth_cagr": sales_growth_cagr,
+                "net_margin": net_margin_latest,
                 "trend_template_pass": trend_template_pass,
                 "trend_template_score": trend_template_score,
                 "rsi_latest": rsi_latest,
@@ -763,6 +869,45 @@ def professional_ml_pipeline(tickers):
         * 98 + 1
     ).astype(int)
 
+    # ------------------------------------------------------------
+    # SMR RATING — MarketSmith's Sales + Margins + ROE, on their
+    # same A-E scale. Each of the three inputs is percentile-ranked
+    # against this universe (rank(pct=True) already skips NaN
+    # automatically, so a stock missing one input just doesn't
+    # affect that input's ranking, rather than crashing or forcing
+    # a fake 0), then averaged, then bucketed into quintiles —
+    # IBD/MarketSmith don't publish their exact letter-grade cutoffs,
+    # so this uses the standard quintile convention (top 20% = A)
+    # rather than pretending to replicate an unpublished formula.
+    # ------------------------------------------------------------
+
+    sales_rank = df["sales_growth_cagr"].rank(pct=True)
+    margin_rank = df["net_margin"].rank(pct=True)
+    roe_rank = df["roe"].rank(pct=True)
+
+    df["smr_percentile"] = (
+        pd.concat(
+            [sales_rank, margin_rank, roe_rank],
+            axis=1
+        ).mean(axis=1, skipna=True)
+    )
+
+    def _smr_grade(pct):
+        if pd.isna(pct):
+            return "N/A"
+        if pct >= 0.80:
+            return "A"
+        elif pct >= 0.60:
+            return "B"
+        elif pct >= 0.40:
+            return "C"
+        elif pct >= 0.20:
+            return "D"
+        else:
+            return "E"
+
+    df["SMR Rating"] = df["smr_percentile"].apply(_smr_grade)
+
     df["Master Score"] = (
         df["Price Strength (RS)"] * 0.5
         + df["EPS Rating"] * 0.5
@@ -782,6 +927,31 @@ def professional_ml_pipeline(tickers):
         df["raw_vol_velocity"]
         .apply(assign_ad_grade)
     )
+
+    # ------------------------------------------------------------
+    # COMPOSITE RATING — MarketSmith blends EPS + RS + SMR + Acc/Dis
+    # + Industry Group RS into one 1-99 score, but doesn't publish
+    # the exact weights ("more weight on EPS and RS" is all O'Neil+Co
+    # discloses publicly). We don't have Industry Group RS (would
+    # need a full NSE sector universe we don't have), so this
+    # combines the four components we DO have, with EPS/RS weighted
+    # higher to match that documented emphasis — an explicit,
+    # disclosed choice, not a claimed replica of their proprietary
+    # formula.
+    # ------------------------------------------------------------
+
+    ad_grade_to_score = {"A": 95, "B": 70, "C": 40}
+    smr_grade_to_score = {"A": 95, "B": 70, "C": 40, "D": 20, "E": 5, "N/A": 40}
+
+    df["acc_dis_numeric"] = df["Acc/Dis Grade"].map(ad_grade_to_score)
+    df["smr_numeric"] = df["SMR Rating"].map(smr_grade_to_score)
+
+    df["Composite Rating"] = (
+        df["EPS Rating"] * 0.30
+        + df["Price Strength (RS)"] * 0.30
+        + df["acc_dis_numeric"] * 0.20
+        + df["smr_numeric"] * 0.20
+    ).round().astype(int)
 
     final_grid_data = []
     records_dictionary = {}
@@ -832,6 +1002,15 @@ def professional_ml_pipeline(tickers):
             "Acc/Dis Grade":
                 row["Acc/Dis Grade"],
 
+            "SMR Rating":
+                row["SMR Rating"],
+
+            "Composite Rating":
+                f"{row['Composite Rating']}/99",
+
+            "raw_composite":
+                row["Composite Rating"],
+
             "Pivot Delta":
                 f"{row['pct_from_pivot']:.1f}%",
 
@@ -873,6 +1052,9 @@ def professional_ml_pipeline(tickers):
 
             "debt_equity":
                 row["debt_equity"],
+
+            "annual_eps_cagr":
+                row["annual_eps_cagr"],
 
             "raw_price":
                 row["current_price"],
@@ -957,6 +1139,24 @@ def check_market_direction():
 PRICE_FLOOR = 100.0
 
 
+def _is_valid(x):
+    """
+    True only for a real, present value. Guards against the pandas
+    None -> NaN silent conversion that happens whenever a column of
+    raw_metrics mixes None (missing data) with actual floats across
+    different tickers: DataFrame construction upcasts that column to
+    float64 and replaces every None with NaN. A plain `is not None`
+    check misses this entirely, so a genuinely-missing value would
+    silently be treated as present and fail every numeric comparison
+    instead of honestly showing as N/A.
+    """
+    if x is None:
+        return False
+    if isinstance(x, float) and pd.isna(x):
+        return False
+    return True
+
+
 def evaluate_qualification(rec, market_info):
 
     price = float(
@@ -976,29 +1176,40 @@ def evaluate_qualification(rec, market_info):
     # so treated as an approximation, not the literal IBD criterion)
     eps_growth = rec["raw_eps_growth"]
     checks["C (EPS growth, approx.)"] = (
-        eps_growth is not None
+        _is_valid(eps_growth)
         and eps_growth >= 0.20
     )
     values["C (EPS growth, approx.)"] = (
         f"{eps_growth * 100:.1f}%"
-        if eps_growth is not None
+        if _is_valid(eps_growth)
         else "—"
     )
 
-    # A — annual multi-year EPS CAGR: genuinely not available from
-    # this data source for NSE tickers
-    checks["A (Annual earnings)"] = None
-    values["A (Annual earnings)"] = "N/A"
+    # A — annual EPS CAGR, computed from yfinance's own income
+    # statement (see the pipeline above). Genuine N/A only when this
+    # specific ticker's statement lacks enough EPS history, not as a
+    # blanket rule.
+    annual_cagr = rec["annual_eps_cagr"]
+    checks["A (Annual earnings)"] = (
+        annual_cagr >= 0.20
+        if _is_valid(annual_cagr)
+        else None
+    )
+    values["A (Annual earnings)"] = (
+        f"{annual_cagr * 100:.1f}% CAGR"
+        if _is_valid(annual_cagr)
+        else "N/A (insufficient EPS history for this ticker)"
+    )
 
     # N — proximity to 52-week high (the quantifiable half of "New")
     pct_off_high = rec["pct_off_high"]
     checks["N (Near 52w high)"] = (
-        pct_off_high is not None
+        _is_valid(pct_off_high)
         and pct_off_high >= -15.0
     )
     values["N (Near 52w high)"] = (
         f"{pct_off_high:.1f}% off high"
-        if pct_off_high is not None
+        if _is_valid(pct_off_high)
         else "—"
     )
 
@@ -1034,12 +1245,12 @@ def evaluate_qualification(rec, market_info):
     roe = rec["roe"]
     checks["ROE >= 17%"] = (
         (roe * 100) >= 17.0
-        if roe is not None
+        if _is_valid(roe)
         else None
     )
     values["ROE >= 17%"] = (
         f"{roe * 100:.1f}%"
-        if roe is not None
+        if _is_valid(roe)
         else "—"
     )
 
@@ -1056,10 +1267,7 @@ def evaluate_qualification(rec, market_info):
     # Minervini's or IBD's numbers are: avoid stocks either broken
     # down (RSI < 40) or dangerously extended (RSI > 80)
     rsi = rec["rsi_latest"]
-    rsi_valid = (
-        rsi is not None
-        and not (isinstance(rsi, float) and pd.isna(rsi))
-    )
+    rsi_valid = _is_valid(rsi)
     checks["RSI healthy (40-80, heuristic)"] = (
         40.0 <= rsi <= 80.0
         if rsi_valid
@@ -1083,11 +1291,11 @@ def evaluate_qualification(rec, market_info):
     avg_vol = rec["avg_volume_20"]
     checks["Liquidity (avg vol >= 100k)"] = (
         avg_vol >= 100_000
-        if avg_vol is not None
+        if _is_valid(avg_vol)
         else None
     )
     values["Liquidity (avg vol >= 100k)"] = (
-        f"{avg_vol:,.0f}" if avg_vol is not None else "—"
+        f"{avg_vol:,.0f}" if _is_valid(avg_vol) else "—"
     )
 
     computable = [
@@ -1324,10 +1532,12 @@ if not df_ranking.empty:
             [
                 "Ticker",
                 "Price",
+                "Composite Rating",
                 "ML Probability",
                 "Master Score",
                 "EPS Rating",
                 "Price Strength (RS)",
+                "SMR Rating",
                 "Group Rank",
                 "Acc/Dis Grade",
                 "Pivot Delta",
@@ -1369,12 +1579,13 @@ else:
 
 st.caption(
     f"Price floor: ₹{PRICE_FLOOR:.0f}. "
-    "**A** (Annual earnings CAGR) and **I** (Institutional sponsorship) "
-    "are shown as N/A — this data isn't available from this data source "
-    "for NSE tickers, so they're left honestly blank rather than "
-    "approximated or guessed. Each cell shows the actual measured "
-    "number, with the pass/fail verdict alongside it — not just a "
-    "bare tick or cross."
+    "**I** (Institutional sponsorship) is shown as N/A — that data "
+    "genuinely isn't available for NSE tickers from any free source. "
+    "**A** (Annual EPS CAGR) is computed from each ticker's own income "
+    "statement and shows N/A only for tickers with too little EPS "
+    "history on file. Each cell shows the actual measured number, "
+    "with the pass/fail verdict alongside it — not just a bare tick "
+    "or cross."
 )
 
 qualification_rows = []
