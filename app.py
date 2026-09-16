@@ -3,178 +3,108 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestClassifier
 
-st.set_page_config(layout="wide", page_title="Pro CANSLIM Engine")
-st.title("🦅 Professional CAN SLIM Growth Intelligence Terminal")
-st.caption("Advanced Multi-Factor Percentile Ranking Pipeline — National Stock Exchange (NSE)")
+st.set_page_config(layout="wide", page_title="AI Velocity Scanner")
+st.title("🦅 Predictive Machine Learning & Velocity Scanner")
+st.caption("Asynchronous Random Forest Classification Model Pipeline — Indian Market Universe")
 
-# --- PRO BACKEND DISCOVERY POOL (Core Growth Leaders) ---
-PRO_POOL = [
-    "PVRINOX.NS", "LMW.NS", "ECLERX.NS", "METROPOLIS.NS", 
-    "HAL.NS", "BEL.NS", "ZOMATO.NS", "BSE.NS", "CDSL.NS", 
-    "TRENT.NS", "TATAMOTORS.NS", "SYRMA.NS", "DIXON.NS", "VBL.NS"
+CORE_POOL = [
+    "SYRMA.NS", "BSE.NS", "LMW.NS", "PVRINOX.NS", "METROPOLIS.NS", 
+    "ECLERX.NS", "HAL.NS", "BEL.NS", "VBL.NS", "DIXON.NS", "ZOMATO.NS", "CDSL.NS"
 ]
 
 @st.cache_data(ttl=900)
-def professional_grading_pipeline(tickers):
-    raw_metrics = []
+def process_machine_learning_pipeline(tickers):
+    analyzed_pool = []
     
-    # PHASE 1: Fetch Raw Data Matrices
     for t in tickers:
         try:
             stock = yf.Ticker(t)
-            hist = stock.history(period="2y")
-            if hist.empty or len(hist) < 252: continue
+            hist = stock.history(period="2y") # Collect broad depth history for ML training arrays
+            if hist.empty or len(hist) < 200: continue
             
             cp = hist['Close']
-            
-            # 1. Precise Time-Weighted Momentum Calculation (CAN SLIM Standard)
-            # Heavy 40% weight on the immediate 3 months, 30% on prior two quarters
-            q1_perf = (cp.iloc[-1] - cp.iloc[-63]) / cp.iloc[-63]
-            q2_perf = (cp.iloc[-63] - cp.iloc[-126]) / cp.iloc[-126]
-            q3_perf = (cp.iloc[-126] - cp.iloc[-252]) / cp.iloc[-252]
-            weighted_momentum = (q1_perf * 0.40) + (q2_perf * 0.30) + (q3_perf * 0.30)
-            
-            # 2. Institutional Volume Velocity (Accumulation/Distribution Intensity)
-            # Measures if volume is expanding heavier on green days vs red days over 30 days
-            delta_price = cp.diff()
-            vol = hist['Volume']
-            green_vol = np.where(delta_price > 0, vol, 0)[-30:].sum()
-            red_vol = np.where(delta_price < 0, vol, 0)[-30:].sum()
-            vol_velocity = (green_vol - red_vol) / (green_vol + red_vol + 1e-6)
-            
-            # 3. Fundamental Earnings Momentum Metric
-            info = stock.info
-            eps_growth = info.get('earningsGrowth', 0)
-            eps_raw = eps_growth if eps_growth is not None else 0.15 # Baseline standard
-            
-            # 4. Nearness to 52-Week High
-            high_52w = cp.iloc[-252:].max()
             current_price = cp.iloc[-1]
+            
+            # --- FEATURE ENGINEERING CELL FOR THE ML ENGINE ---
+            df_features = hist.copy()
+            df_features['Returns'] = df_features['Close'].pct_change()
+            df_features['MA10'] = df_features['Close'].rolling(10).mean()
+            df_features['MA30'] = df_features['Close'].rolling(30).mean()
+            df_features['Vol_MA10'] = df_features['Volume'].rolling(10).mean()
+            
+            # Target Vector generation: Will price be higher in 5 trading sessions?
+            df_features['Target'] = np.where(df_features['Close'].shift(-5) > df_features['Close'], 1, 0)
+            df_features.dropna(inplace=True)
+            
+            # Splitting Features matrix
+            feature_cols = ['Close', 'Volume', 'Returns', 'MA10', 'MA30', 'Vol_MA10']
+            X = df_features[feature_cols].values
+            y = df_features['Target'].values
+            
+            # Train the Multi-Decision Classifier Model
+            # Trains dynamically on history up to the immediate candle
+            clf = RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42)
+            clf.fit(X[:-5], y[:-5])
+            
+            # Predict directional hit score for current live parameters
+            current_vector = np.array([df_features[feature_cols].iloc[-1]])
+            prob_higher = clf.predict_proba(current_vector)[0][1] * 100
+            
+            # Velocity Benchmarks
+            return_3m = ((current_price - cp.iloc[-63]) / cp.iloc[-63]) * 100
+            return_1y = ((current_price - cp.iloc[-252]) / cp.iloc[-252]) * 100
+            
+            recent_pivot = hist['High'].iloc[-40:-3].max()
+            pivot_delta = ((current_price - recent_pivot) / recent_pivot) * 100
+            high_52w = cp.max()
             pct_off_high = ((current_price - high_52w) / high_52w) * 100
             
-            # 5. Breakout Pivot Detection (Last 60 days consolidation high ceiling)
-            pivot_price = hist['High'].iloc[-60:-5].max()
-            pct_from_pivot = ((current_price - pivot_price) / pivot_price) * 100
-            
-            raw_metrics.append({
-                "ticker": t, "hist": hist, "current_price": current_price, "pivot_price": pivot_price,
-                "pct_from_pivot": pct_from_pivot, "raw_momentum": weighted_momentum, 
-                "raw_vol_velocity": vol_velocity, "raw_eps": eps_raw, "pct_off_high": pct_off_high
+            analyzed_pool.append({
+                "Ticker": t, "Price (₹)": f"{current_price:.2f}",
+                "3-Month Return": return_3m, "1-Year Return": return_1y,
+                "ML Win Probability": prob_higher, "Delta From Pivot": pivot_delta,
+                "Distance to 52W High": f"{pct_off_high:.1f}%",
+                "raw_pivot": recent_pivot, "raw_hist": hist, "raw_current": current_price
             })
         except Exception as e:
             continue
             
-    if not raw_metrics: return pd.DataFrame(), {}
+    if not analyzed_pool: return pd.DataFrame(), {}
     
-    # PHASE 2: Competitive Cross-Market Percentile Ranking (The 1-99 Pro Scale)
-    df = pd.DataFrame(raw_metrics)
+    df_out = pd.DataFrame(analyzed_pool).sort_values(by="ML Win Probability", ascending=False)
+    df_out['3-Month Return'] = df_out['3-Month Return'].apply(lambda x: f"{x:+.1f}%")
+    df_out['1-Year Return'] = df_out['1-Year Return'].apply(lambda x: f"{x:+.1f}%")
+    df_out['Delta From Pivot'] = df_out['Delta From Pivot'].apply(lambda x: f"{x:+.1f}%")
+    df_out['ML Win Probability'] = df_out['ML Win Probability'].apply(lambda x: f"{x:.1f}%")
     
-    # Mathematical Percentile distribution across the entire running universe
-    df['Price Strength (RS)'] = (df['raw_momentum'].rank(pct=True) * 98 + 1).astype(int)
-    df['EPS Rating'] = (df['raw_eps'].rank(pct=True) * 98 + 1).astype(int)
-    
-    # Map Accumulation intensity to clear institutional alphabet letters
-    def assign_ad_grade(val):
-        if val > 0.15: return 'A-' or 'A'
-        elif val > 0.0: return 'B'
-        elif val > -0.15: return 'C'
-        return 'D'
-    df['Acc/Dis Grade'] = df['raw_vol_velocity'].apply(assign_ad_grade)
-    
-    # Calculate Unified Composite Master Rating
-    df['Composite Rating'] = ((df['Price Strength (RS)'] * 0.5) + (df['EPS Rating'] * 0.5)).astype(int)
-    
-    # Generate final clean records for rendering
-    final_analysis = []
-    records_dictionary = {}
-    
-    for _, row in df.iterrows():
-        t = row['ticker']
-        
-        # Determine actionable status tags
-        if row['Composite Rating'] >= 80 and 0 <= row['pct_from_pivot'] <= 5.5:
-            status = "🟩 Actionable Breakout"
-        elif row['pct_off_high'] >= -15:
-            status = "🔄 Building Valid Base"
-        else:
-            status = "⚠️ Lagging / Avoid"
-            
-        rec = {
-            "Ticker": t,
-            "Current Price": f"₹{row['current_price']:.2f}",
-            "Composite Rating": f"{row['Composite Rating']}/99",
-            "EPS Rating": f"{row['EPS Rating']}/99",
-            "Price Strength (RS)": f"{row['Price Strength (RS)']}/99",
-            "Acc/Dis Grade": row['Acc/Dis Grade'],
-            "Pivot Delta": f"{row['pct_from_pivot']:.1f}%",
-            "Off 52W High": f"{row['pct_off_high']:.1f}%",
-            "Status": status,
-            "raw_pivot": row['pivot_price'], "raw_hist": row['hist']
-        }
-        final_analysis.append(rec)
-        records_dictionary[t] = rec
-        
-    # Sort entire table grid by highest Composite Strength overall
-    df_sorted = pd.DataFrame(final_analysis).sort_values(by="Composite Rating", ascending=False)
-    return df_sorted, records_dictionary
+    records_map = {r['Ticker']: r for r in analyzed_pool}
+    return df_out, records_map
 
-# Execute Pipeline
-df_ranking, master_records = professional_grading_pipeline(PRO_POOL)
+df_grid, master_map = process_machine_learning_pipeline(CORE_POOL)
 
-# --- WEB TERMINAL DASHBOARD LAYOUT ---
-st.subheader("📋 1. Comparative Performance Matrix & Percentile Standings")
-if not df_ranking.empty:
-    st.dataframe(df_ranking[["Ticker", "Current Price", "Composite Rating", "EPS Rating", "Price Strength (RS)", "Acc/Dis Grade", "Pivot Delta", "Off 52W High", "Status"]], use_container_width=True, hide_index=True)
+# --- USER DISPLAY INTERFACE ---
+st.subheader("📋 1. Core Predictive Matrix (Ranked by Asynchronous ML Probability Score)")
+if not df_grid.empty:
+    st.dataframe(df_grid[["Ticker", "Price (₹)", "ML Win Probability", "3-Month Return", "1-Year Return", "Delta From Pivot", "Distance to 52W High"]], use_container_width=True, hide_index=True)
 
 st.markdown("---")
+st.subheader("🔎 2. Targeted Technical Target Matrix")
 
-# --- LIVE ISOLATION & PRO SEARCH OPPORTUNITY ---
-st.subheader("🔎 2. Targeted Intelligence Search Unit")
-search_query = st.text_input("Search or inject any outside NSE ticker to calculate its ratings instantly (e.g. PVRINOX.NS, LMW.NS, ECLERX.NS):", "").strip().upper()
+search_box = st.text_input("Filter or run any specific stock code:", "").strip().upper()
+active_ticker = search_box if (search_box in master_map) else (list(master_map.keys()) if master_map else None)
 
-active_selection = None
-if search_query:
-    if search_query in master_records:
-        active_selection = search_query
-    else:
-        with st.spinner(f"Running deep mathematical grading profile for {search_query}..."):
-            _, extra_rec = professional_grading_pipeline([search_query])
-            if search_query in extra_rec:
-                master_records.update(extra_rec)
-                active_selection = search_query
-            else:
-                st.error("Ticker unrecognized. Verify code and verify '.NS' suffix is used.")
-else:
-    if list(master_records.keys()):
-        active_selection = list(master_records.keys())[0]
-
-# Render Analytical Breakdown & Predictive AI Candlestick Continuation
-if active_selection and active_selection in master_records:
-    s = master_records[active_selection]
+if active_ticker and active_ticker in master_map:
+    s = master_map[active_ticker]
+    st.markdown(f"### Performance Focus File: **{active_ticker}**")
+    st.info(f"🔴 **Calculated Risk Limits:** Technical Stop Loss Floor: ₹{s['raw_pivot']*0.93:.2f} | Execution Target Range: ₹{s['raw_pivot']*1.20:.2f} to ₹{s['raw_pivot']*1.25:.2f}")
     
-    st.markdown(f"### Core Focus File: **{active_selection}**")
-    st.info(f"🛡️ **Algorithmic Execution Constraints:** Initial Stop Loss Floor: ₹{s['raw_pivot']*0.93:.2f} (-7%) | Institutional Take Profit Objective: ₹{s['raw_pivot']*1.20:.2f} (+20%)")
-
-    # ML Continuation Model Architecture
-    df_chart = s['raw_hist'].copy()
-    df_chart['Day_Index'] = np.arange(len(df_chart))
+    df_c = s['raw_hist'].copy()
     
-    # Isolate last 20 active candles to compute immediate velocity vectors
-    X_train = df_chart[['Day_Index']].values[-20:]
-    y_train = df_chart['Close'].values[-20:]
-    ml_model = LinearRegression().fit(X_train, y_train)
-    
-    future_x = np.array([[len(df_chart) + i] for i in range(1, 6)])
-    future_y = ml_model.predict(future_x)
-    future_timeline = pd.date_range(start=df_chart.index[-1] + pd.Timedelta(days=1), periods=5)
-
-    # Rendering Interactive Visual Framework
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=df_chart.index[-60:], open=df_chart['Open'].iloc[-60:], high=df_chart['High'].iloc[-60:], low=df_chart['Low'].iloc[-60:], close=df_chart['Close'].iloc[-60:], name="Price Candles"))
-    fig.add_trace(go.Scatter(x=df_chart.index[-60:], y=[s['raw_pivot']]*60, mode='lines', name='Resistance Pivot Ceiling', line=dict(color='orange', width=2, dash='dot')))
-    fig.add_trace(go.Scatter(x=future_timeline, y=future_y, mode='lines+markers', name='5-Day Predictive AI Continuation Vector', line=dict(color='cyan', width=3)))
+    fig.add_trace(go.Candlestick(x=df_c.index[-60:], open=df_c['Open'].iloc[-60:], high=df_c['High'].iloc[-60:], low=df_c['Low'].iloc[-60:], close=df_c['Close'].iloc[-60:], name="Candles"))
+    fig.add_trace(go.Scatter(x=df_c.index[-60:], y=[s['raw_pivot']]*60, mode='lines', name='Chart Pivot Ceiling', line=dict(color='orange', width=2, dash='dot')))
     
-    fig.update_layout(yaxis_title="Price (INR)", xaxis_rangeslider_visible=False, height=450, margin=dict(l=20, r=20, t=20, b=20))
+    fig.update_layout(yaxis_title="Price (INR)", xaxis_rangeslider_visible=False, height=450, margin=dict(l=15, r=15, t=15, b=15))
     st.plotly_chart(fig, use_container_width=True)
