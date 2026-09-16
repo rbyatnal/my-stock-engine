@@ -12,11 +12,12 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
 st.set_page_config(
     layout="wide",
-    page_title="Rakshit-Stocks-Terminal"
+    page_title="Rakshits-Insights-Terminal"
 )
 
+
 # ============================================================
-# THEME
+# THEME & HEADER
 # ============================================================
 
 if "theme" not in st.session_state:
@@ -27,19 +28,94 @@ header_left, header_right = st.columns([10, 1])
 with header_left:
     st.markdown(
         """
-        <div style="
-            font-size:20px;
-            font-weight:700;
-            letter-spacing:0.4px;
-            margin-bottom:2px;
-        ">
-            Rakshit-Stocks-Terminal
-            <span style="
-                font-size:12px;
-                font-weight:400;
-                opacity:0.65;
-            ">
-                (In Progress)
+        <style>
+        @keyframes rotateCube {
+            0% { transform: rotateX(-22deg) rotateY(0deg); }
+            100% { transform: rotateX(-22deg) rotateY(360deg); }
+        }
+        .rubiks-container {
+            width: 28px;
+            height: 28px;
+            perspective: 200px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 10px;
+        }
+        .rubiks-cube {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            transform-style: preserve-3d;
+            animation: rotateCube 6s infinite linear;
+        }
+        .cube-face {
+            position: absolute;
+            width: 28px;
+            height: 28px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 1px;
+            background-color: #000;
+            border: 1px solid #000;
+            box-sizing: border-box;
+        }
+        .cube-face div {
+            border-radius: 1px;
+        }
+        .front  { transform: translateZ(14px); }
+        .back   { transform: rotateY(180deg) translateZ(14px); }
+        .right  { transform: rotateY(90deg) translateZ(14px); }
+        .left   { transform: rotateY(-90deg) translateZ(14px); }
+        .top    { transform: rotateX(90deg) translateZ(14px); }
+        .bottom { transform: rotateX(-90deg) translateZ(14px); }
+
+        .c-red    { background-color: #E63946; }
+        .c-blue   { background-color: #1D3557; }
+        .c-white  { background-color: #F1FAEE; }
+        .c-yellow { background-color: #FFB703; }
+        .c-green  { background-color: #2A9D8F; }
+        .c-orange { background-color: #FB8500; }
+        </style>
+
+        <div style="font-size:22px; font-weight:700; letter-spacing:0.4px; margin-bottom:2px; display:flex; align-items:center;">
+            <div class="rubiks-container">
+                <div class="rubiks-cube">
+                    <div class="cube-face front">
+                        <div class="c-red"></div><div class="c-red"></div><div class="c-red"></div>
+                        <div class="c-red"></div><div class="c-red"></div><div class="c-red"></div>
+                        <div class="c-red"></div><div class="c-red"></div><div class="c-red"></div>
+                    </div>
+                    <div class="cube-face back">
+                        <div class="c-orange"></div><div class="c-orange"></div><div class="c-orange"></div>
+                        <div class="c-orange"></div><div class="c-orange"></div><div class="c-orange"></div>
+                        <div class="c-orange"></div><div class="c-orange"></div><div class="c-orange"></div>
+                    </div>
+                    <div class="cube-face right">
+                        <div class="c-blue"></div><div class="c-blue"></div><div class="c-blue"></div>
+                        <div class="c-blue"></div><div class="c-blue"></div><div class="c-blue"></div>
+                        <div class="c-blue"></div><div class="c-blue"></div><div class="c-blue"></div>
+                    </div>
+                    <div class="cube-face left">
+                        <div class="c-green"></div><div class="c-green"></div><div class="c-green"></div>
+                        <div class="c-green"></div><div class="c-green"></div><div class="c-green"></div>
+                        <div class="c-green"></div><div class="c-green"></div><div class="c-green"></div>
+                    </div>
+                    <div class="cube-face top">
+                        <div class="c-white"></div><div class="c-white"></div><div class="c-white"></div>
+                        <div class="c-white"></div><div class="c-white"></div><div class="c-white"></div>
+                        <div class="c-white"></div><div class="c-white"></div><div class="c-white"></div>
+                    </div>
+                    <div class="cube-face bottom">
+                        <div class="c-yellow"></div><div class="c-yellow"></div><div class="c-yellow"></div>
+                        <div class="c-yellow"></div><div class="c-yellow"></div><div class="c-yellow"></div>
+                        <div class="c-yellow"></div><div class="c-yellow"></div><div class="c-yellow"></div>
+                    </div>
+                </div>
+            </div>
+            <span>
+                Rakshits-Insights-Terminal 
+                <span style="font-size:12px; font-weight:400; opacity:0.65;">(In Progress)</span>
             </span>
         </div>
         """,
@@ -180,7 +256,6 @@ st.info(
 # ============================================================
 
 CORE_POOL = [
-
     "SYRMA.NS",
     "BSE.NS",
     "LMW.NS",
@@ -193,7 +268,6 @@ CORE_POOL = [
     "DIXON.NS",
     "ZOMATO.NS",
     "CDSL.NS"
-
 ]
 
 
@@ -1008,24 +1082,29 @@ if (
 
 
     # ========================================================
-    # FUTURE DATES
+    # TIMEFRAME-AWARE FUTURE DATES
     # ========================================================
 
-    future_dates = pd.bdate_range(
+    timeframe_offsets = {
+        "5M": pd.Timedelta(minutes=5),
+        "15M": pd.Timedelta(minutes=15),
+        "30M": pd.Timedelta(minutes=30),
+        "1H": pd.Timedelta(hours=1),
+        "1D": pd.Timedelta(days=1)
+    }
 
-        start=(
-            df_chart.index[-1]
-            +
-            pd.Timedelta(days=1)
-        ),
+    step_delta = timeframe_offsets.get(timeframe, pd.Timedelta(days=1))
+    last_timestamp = df_chart.index[-1]
 
-        periods=future_steps
-    )
+    future_dates = [
+        last_timestamp + (i * step_delta)
+        for i in range(1, future_steps + 1)
+    ]
 
     projection_dates = (
-        [df_chart.index[-1]]
+        [last_timestamp]
         +
-        list(future_dates)
+        future_dates
     )
 
     projection_prices = (
@@ -1212,6 +1291,21 @@ if (
             else "plotly_white"
         )
     )
+
+    # Remove non-trading time gaps on intraday timeframes
+    if timeframe in ["5M", "15M", "30M", "1H"]:
+        fig.update_xaxes(
+            rangebreaks=[
+                dict(bounds=["sat", "mon"]),
+                dict(bounds=[15.5, 9.25], pattern="hour")
+            ]
+        )
+    elif timeframe == "1D":
+        fig.update_xaxes(
+            rangebreaks=[
+                dict(bounds=["sat", "mon"])
+            ]
+        )
 
 
     st.plotly_chart(
