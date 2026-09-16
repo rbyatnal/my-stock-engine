@@ -7,19 +7,76 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from datetime import datetime
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE CONFIGURATION & LAYOUT FIXES
 # ============================================================
 st.set_page_config(
     layout="wide",
     page_title="Rakshits-Insights-Terminal"
 )
 
-# ============================================================
-# BRANDING HEADER & ROTATING 3D RUBIK'S CUBE
-# ============================================================
 if "theme" not in st.session_state:
     st.session_state.theme = "Black"
 
+BG = "#0E1117" if st.session_state.theme == "Black" else "#FFFFFF"
+TEXT = "#FFFFFF" if st.session_state.theme == "Black" else "#111111"
+PANEL = "#161B22" if st.session_state.theme == "Black" else "#F5F5F5"
+BORDER = "#30363D" if st.session_state.theme == "Black" else "#D0D0D0"
+
+# Fixed CSS: Clears top navbar clipping and ensures dynamic text colors
+st.markdown(
+    f"""
+    <style>
+    /* Prevent Streamlit top header from overlapping custom title */
+    header[data-testid="stHeader"] {{
+        background-color: transparent !important;
+        z-index: 1;
+    }}
+
+    /* Push container down past native browser toolbar */
+    .block-container {{
+        padding-top: 3.5rem !important;
+        padding-bottom: 2rem !important;
+    }}
+
+    .stApp {{
+        background-color: {BG};
+        color: {TEXT};
+    }}
+
+    /* Title & contrast fixes */
+    .title-text {{
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        display: inline-block;
+        vertical-align: middle;
+        color: {TEXT} !important;
+    }}
+
+    .sub-title-text {{
+        font-size: 13px;
+        font-weight: 400;
+        opacity: 0.85;
+        color: {TEXT} !important;
+    }}
+
+    div[data-testid="metric-container"] {{
+        background: {PANEL};
+        border: 1px solid {BORDER};
+        border-radius: 8px;
+        padding: 10px;
+    }}
+    
+    input, textarea {{ background-color:{PANEL} !important; color:{TEXT} !important; }}
+    div[data-baseweb="select"] > div {{ background-color:{PANEL}; color:{TEXT}; }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# ============================================================
+# BRANDING HEADER & ROTATING 3D RUBIK'S CUBE
+# ============================================================
 header_col, toggle_col = st.columns([9, 1])
 
 with header_col:
@@ -71,17 +128,9 @@ with header_col:
         .c-yellow { background-color: #FFB703; }
         .c-green  { background-color: #2A9D8F; }
         .c-orange { background-color: #FB8500; }
-        
-        .title-text {
-            font-size: 26px;
-            font-weight: 800;
-            letter-spacing: 0.5px;
-            display: inline-block;
-            vertical-align: middle;
-        }
         </style>
 
-        <div style="padding: 10px 0px;">
+        <div style="padding: 5px 0px;">
             <div class="rubiks-container">
                 <div class="rubiks-cube">
                     <div class="cube-face front"><div class="c-red"></div><div class="c-red"></div><div class="c-red"></div><div class="c-red"></div><div class="c-red"></div><div class="c-red"></div><div class="c-red"></div><div class="c-red"></div><div class="c-red"></div></div>
@@ -94,7 +143,7 @@ with header_col:
             </div>
             <span class="title-text">
                 Rakshits-Insights-Terminal 
-                <span style="font-size:13px; font-weight:400; opacity:0.65;">(CAN SLIM Quantitative Intelligence)</span>
+                <span class="sub-title-text">(CAN SLIM Quantitative Intelligence)</span>
             </span>
         </div>
         """,
@@ -104,25 +153,6 @@ with header_col:
 with toggle_col:
     theme = st.toggle("⚫", value=(st.session_state.theme == "Black"))
     st.session_state.theme = "Black" if theme else "White"
-
-BG = "#0E1117" if st.session_state.theme == "Black" else "#FFFFFF"
-TEXT = "#FFFFFF" if st.session_state.theme == "Black" else "#111111"
-PANEL = "#161B22" if st.session_state.theme == "Black" else "#F5F5F5"
-BORDER = "#30363D" if st.session_state.theme == "Black" else "#D0D0D0"
-
-st.markdown(
-    f"""
-    <style>
-    .stApp {{ background-color:{BG}; color:{TEXT}; }}
-    .block-container {{ padding-top:1rem; }}
-    h1,h2,h3,h4,h5,h6,p,label {{ color:{TEXT} !important; }}
-    div[data-testid="metric-container"] {{ background:{PANEL}; border:1px solid {BORDER}; border-radius:8px; padding:10px; }}
-    input, textarea {{ background-color:{PANEL} !important; color:{TEXT} !important; }}
-    div[data-baseweb="select"] > div {{ background-color:{PANEL}; color:{TEXT}; }}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 
 # ============================================================
 # MULTI-CAP DISCOVERY UNIVERSE
@@ -273,7 +303,7 @@ else:
         active_selection = list(master_records.keys())[0]
 
 # ============================================================
-# ANALYSIS & PREDICTION
+# ANALYSIS & PREDICTION HORIZON
 # ============================================================
 if active_selection and active_selection in master_records:
     s = master_records[active_selection]
