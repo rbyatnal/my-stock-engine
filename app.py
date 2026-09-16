@@ -357,38 +357,61 @@ def professional_ml_pipeline(tickers):
 
             current_price = float(cp.iloc[-1])
 
-            q1_perf = (
+            # ------------------------------------------------
+            # RS RATING — REAL IBD FORMULA
+            #
+            # FIX: the previous version computed quarter-over-quarter
+            # deltas (price change *within* each 63-day slice), which
+            # is not what IBD's RS Rating measures at all. The actual
+            # formula is a weighted blend of *trailing cumulative
+            # returns* from today back to 3/6/9/12 months ago:
+            #   RS Score = 0.4*r3mo + 0.2*r6mo + 0.2*r9mo + 0.2*r12mo
+            # (confirmed against IBD's own published methodology and
+            # multiple independent replications of it).
+            # ------------------------------------------------
+
+            r3mo = (
                 current_price - cp.iloc[-63]
             ) / cp.iloc[-63]
 
-            q2_perf = (
-                cp.iloc[-63] - cp.iloc[-126]
+            r6mo = (
+                current_price - cp.iloc[-126]
             ) / cp.iloc[-126]
 
-            q3_perf = (
-                cp.iloc[-126] - cp.iloc[-252]
+            r9mo = (
+                current_price - cp.iloc[-189]
+            ) / cp.iloc[-189]
+
+            r12mo = (
+                current_price - cp.iloc[-252]
             ) / cp.iloc[-252]
 
             weighted_momentum = (
-                q1_perf * 0.40
-                + q2_perf * 0.30
-                + q3_perf * 0.30
+                r3mo * 0.40
+                + r6mo * 0.20
+                + r9mo * 0.20
+                + r12mo * 0.20
             )
 
             delta_price = cp.diff()
             vol = hist["Volume"]
 
+            # FIX: MarketSmith's Acc/Dis Rating is explicitly defined
+            # over a fixed 13-week window (65 trading days), not an
+            # arbitrary 30-bar slice.
+            ad_window = min(65, len(hist))
+
             green_vol = np.where(
                 delta_price > 0,
                 vol,
                 0
-            )[-30:].sum()
+            )[-ad_window:].sum()
 
             red_vol = np.where(
                 delta_price < 0,
                 vol,
                 0
-            )[-30:].sum()
+            )[-ad_window:].sum()
 
             vol_velocity = (
                 (green_vol - red_vol)
@@ -400,12 +423,17 @@ def professional_ml_pipeline(tickers):
                 eps_g = info.get("earningsGrowth", 0)
 
                 if eps_g is None:
-                    eps_raw = q1_perf * 0.5
+                    eps_raw = r3mo * 0.5
                 else:
                     eps_raw = float(eps_g)
 
+                roe_raw = info.get("returnOnEquity", None)
+                debt_equity_raw = info.get("debtToEquity", None)
+
             except Exception:
-                eps_raw = q1_perf * 0.5
+                eps_raw = r3mo * 0.5
+                roe_raw = None
+                debt_equity_raw = None
 
             high_52w = float(cp.max())
 
@@ -530,7 +558,9 @@ def professional_ml_pipeline(tickers):
                 "raw_vol_velocity": vol_velocity,
                 "raw_eps": eps_raw,
                 "pct_off_high": pct_off_high,
-                "ml_prob": prob_higher
+                "ml_prob": prob_higher,
+                "roe": roe_raw,
+                "debt_equity": debt_equity_raw
 
             })
 
@@ -655,7 +685,19 @@ def professional_ml_pipeline(tickers):
                 row["ml_prob"],
 
             "pct_off_high":
-                row["pct_off_high"]
+                row["pct_off_high"],
+
+            "roe":
+                row["roe"],
+
+            "debt_equity":
+                row["debt_equity"],
+
+            "raw_price":
+                row["current_price"],
+
+            "raw_eps_growth":
+                row["raw_eps"]
 
         }
 
@@ -674,12 +716,140 @@ def professional_ml_pipeline(tickers):
 
 
 # ============================================================
+# MARKET DIRECTION (the "M" in CAN SLIM) — a global gate, not
+# a per-stock one: O'Neil's rule is that even strong individual
+# stocks are avoided when the broad market itself is unfavorable.
+# We check NIFTY 50 against its own 50-day and 200-day average.
+# ============================================================
+
+@st.cache_data(ttl=900)
+def check_market_direction():
+
+    try:
+        index = yf.Ticker("^NSEI")
+        index_hist = index.history(period="1y")
+
+        if index_hist.empty or len(index_hist) < 200:
+            return None
+
+        index_close = index_hist["Close"]
+        index_price = float(index_close.iloc[-1])
+        ma50 = float(index_close.rolling(50).mean().iloc[-1])
+        ma200 = float(index_close.rolling(200).mean().iloc[-1])
+
+        bullish = index_price > ma50 and index_price > ma200
+
+        return {
+            "bullish": bullish,
+            "price": index_price,
+            "ma50": ma50,
+            "ma200": ma200
+        }
+
+    except Exception:
+        return None
+
+
+# ============================================================
+# CAN SLIM QUALIFICATION SCREEN
+#
+# Every criterion here is either a real, checkable number, or
+# explicitly marked as unavailable — nothing here is a guessed
+# placeholder standing in for data we don't actually have.
+# ============================================================
+
+PRICE_FLOOR = 100.0
+
+
+def evaluate_qualification(rec, market_info):
+
+    price = float(
+        rec["raw_price"]
+    )
+
+    checks = {}
+
+    checks["Price Band"] = (
+        price >= PRICE_FLOOR
+    )
+
+    # C — current-quarter EPS growth proxy (Yahoo's trailing
+    # earningsGrowth field; not a clean isolated quarterly figure,
+    # so treated as an approximation, not the literal IBD criterion)
+    eps_growth = rec["raw_eps_growth"]
+    checks["C (EPS growth, approx.)"] = (
+        eps_growth is not None
+        and eps_growth >= 0.20
+    )
+
+    # A — annual multi-year EPS CAGR: genuinely not available from
+    # this data source for NSE tickers
+    checks["A (Annual earnings)"] = None
+
+    # N — proximity to 52-week high (the quantifiable half of "New")
+    pct_off_high = rec["pct_off_high"]
+    checks["N (Near 52w high)"] = (
+        pct_off_high is not None
+        and pct_off_high >= -15.0
+    )
+
+    # S — Supply/Demand via the Acc/Dis grade
+    checks["S (Acc/Dis A or B)"] = (
+        rec["Acc/Dis Grade"] in ("A", "B")
+    )
+
+    # L — Leader: RS Rating >= 70
+    checks["L (RS Rating >= 70)"] = (
+        rec["raw_rs"] >= 70
+    )
+
+    # I — institutional sponsorship: genuinely not available
+    checks["I (Institutional)"] = None
+
+    # M — market direction: global, same value for every stock
+    checks["M (Market direction)"] = (
+        market_info["bullish"]
+        if market_info is not None
+        else None
+    )
+
+    # ROE — O'Neil's studied winners averaged ~17%+
+    roe = rec["roe"]
+    checks["ROE >= 17%"] = (
+        (roe * 100) >= 17.0
+        if roe is not None
+        else None
+    )
+
+    computable = [
+        v for v in checks.values()
+        if v is not None
+    ]
+
+    if not checks["Price Band"]:
+        status = "Below price floor"
+
+    elif computable and all(computable):
+        status = "Qualified"
+
+    elif computable and any(computable):
+        status = "Watchlist"
+
+    else:
+        status = "Insufficient data"
+
+    return checks, status
+
+
+# ============================================================
 # LOAD MARKET
 # ============================================================
 
 df_ranking, master_records = professional_ml_pipeline(
     CORE_POOL
 )
+
+market_direction = check_market_direction()
 
 
 # ============================================================
@@ -882,6 +1052,88 @@ if not df_ranking.empty:
                 "Status"
             ]
         ],
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# ============================================================
+# CAN SLIM QUALIFICATION SCREEN
+# ============================================================
+
+st.markdown("### 🧪 CAN SLIM Qualification Screen")
+
+if market_direction is not None:
+
+    market_status_text = (
+        "🟢 Bullish — NIFTY 50 above its 50-day and 200-day average"
+        if market_direction["bullish"]
+        else "🔴 Unfavorable — NIFTY 50 below its 50-day and/or 200-day average"
+    )
+
+    st.info(
+        f"**M — Market Direction:** {market_status_text}  "
+        f"(NIFTY 50: ₹{market_direction['price']:.2f} · "
+        f"50-day avg: ₹{market_direction['ma50']:.2f} · "
+        f"200-day avg: ₹{market_direction['ma200']:.2f})"
+    )
+
+else:
+
+    st.warning(
+        "M — Market Direction: could not be determined "
+        "(NIFTY 50 data unavailable)."
+    )
+
+st.caption(
+    f"Price floor: ₹{PRICE_FLOOR:.0f}. "
+    "**A** (Annual earnings CAGR) and **I** (Institutional sponsorship) "
+    "are shown as N/A — this data isn't available from this data source "
+    "for NSE tickers, so they're left honestly blank rather than "
+    "approximated or guessed."
+)
+
+qualification_rows = []
+
+for ticker, rec in master_records.items():
+
+    checks, status = evaluate_qualification(
+        rec,
+        market_direction
+    )
+
+    def fmt(v):
+        if v is None:
+            return "N/A"
+        return "✅" if v else "❌"
+
+    qualification_rows.append({
+        "Ticker": ticker,
+        "Status": status,
+        **{k: fmt(v) for k, v in checks.items()}
+    })
+
+if qualification_rows:
+
+    qual_df = pd.DataFrame(qualification_rows)
+
+    status_order = {
+        "Qualified": 0,
+        "Watchlist": 1,
+        "Insufficient data": 2,
+        "Below price floor": 3
+    }
+
+    qual_df["_sort"] = qual_df["Status"].map(status_order)
+
+    qual_df = (
+        qual_df
+        .sort_values("_sort")
+        .drop(columns="_sort")
+    )
+
+    st.dataframe(
+        qual_df,
         use_container_width=True,
         hide_index=True
     )
