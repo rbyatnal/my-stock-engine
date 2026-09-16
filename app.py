@@ -652,7 +652,10 @@ def professional_ml_pipeline(tickers):
                 row["pct_from_pivot"],
 
             "raw_ml_prob":
-                row["ml_prob"]
+                row["ml_prob"],
+
+            "pct_off_high":
+                row["pct_off_high"]
 
         }
 
@@ -847,6 +850,40 @@ with hero_col2:
         </div>
         """),
         unsafe_allow_html=True
+    )
+
+
+# ============================================================
+# COMPARATIVE PERFORMANCE MATRIX (restored — this table was
+# dropped during an earlier UI rebuild without being flagged)
+# ============================================================
+
+st.markdown("### 📋 Comparative Performance Matrix")
+
+st.caption(
+    "All loaded stocks, ranked by ML Probability. "
+    "Select a stock below or in the sidebar for its full detail view."
+)
+
+if not df_ranking.empty:
+
+    st.dataframe(
+        df_ranking[
+            [
+                "Ticker",
+                "Price",
+                "ML Probability",
+                "Master Score",
+                "EPS Rating",
+                "Price Strength (RS)",
+                "Group Rank",
+                "Acc/Dis Grade",
+                "Pivot Delta",
+                "Status"
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True
     )
 
 
