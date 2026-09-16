@@ -18,7 +18,7 @@ st.set_page_config(
     page_title="Rakshit's CANSLIM Terminal",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 
@@ -29,15 +29,10 @@ st.set_page_config(
 if "theme" not in st.session_state:
     st.session_state.theme = "Dark"
 
-with st.sidebar:
-    st.markdown("## ⚙️ Display")
-    theme = st.radio(
-        "Theme",
-        ["Dark", "Light"],
-        index=0 if st.session_state.theme == "Dark" else 1,
-        horizontal=True
-    )
-    st.session_state.theme = theme
+# Widget itself is rendered later (in the top control bar, after the
+# topbar/branding) so it appears in the page where it makes sense —
+# but the *value* has to be known now, before the CSS below is built.
+theme = st.session_state.theme
 
 
 # ============================================================
@@ -119,6 +114,41 @@ st.markdown(
 
     h1, h2, h3 {{
         color: {TEXT} !important;
+    }}
+
+    /* FIX: st.chat_input(), like the button before it, never had
+       any theme CSS applied to it — it was rendering with
+       Streamlit's own default styling, which can leave the typed
+       text the same color as its own background (invisible) even
+       though typing itself works fine. Forcing explicit colors on
+       every layer (container, the actual textarea, and its
+       placeholder) fixes this regardless of which one was the
+       actual culprit. */
+    [data-testid="stChatInput"] {{
+        background: {PANEL} !important;
+        border: 1px solid {BORDER} !important;
+        border-radius: 12px !important;
+    }}
+
+    [data-testid="stChatInput"] textarea {{
+        background: {PANEL} !important;
+        color: {TEXT} !important;
+        caret-color: {TEXT} !important;
+        -webkit-text-fill-color: {TEXT} !important;
+        opacity: 1 !important;
+    }}
+
+    [data-testid="stChatInput"] textarea::placeholder {{
+        color: {MUTED} !important;
+        opacity: 1 !important;
+    }}
+
+    [data-testid="stChatInput"] button {{
+        background: {ACCENT} !important;
+    }}
+
+    [data-testid="stChatInput"] button svg {{
+        fill: {BG} !important;
     }}
 
     .metric-card {{
@@ -934,10 +964,12 @@ def evaluate_qualification(rec, market_info):
     )
 
     checks = {}
+    values = {}
 
     checks["Price Band"] = (
         price >= PRICE_FLOOR
     )
+    values["Price Band"] = f"₹{price:.2f}"
 
     # C — current-quarter EPS growth proxy (Yahoo's trailing
     # earningsGrowth field; not a clean isolated quarterly figure,
@@ -947,10 +979,16 @@ def evaluate_qualification(rec, market_info):
         eps_growth is not None
         and eps_growth >= 0.20
     )
+    values["C (EPS growth, approx.)"] = (
+        f"{eps_growth * 100:.1f}%"
+        if eps_growth is not None
+        else "—"
+    )
 
     # A — annual multi-year EPS CAGR: genuinely not available from
     # this data source for NSE tickers
     checks["A (Annual earnings)"] = None
+    values["A (Annual earnings)"] = "N/A"
 
     # N — proximity to 52-week high (the quantifiable half of "New")
     pct_off_high = rec["pct_off_high"]
@@ -958,25 +996,38 @@ def evaluate_qualification(rec, market_info):
         pct_off_high is not None
         and pct_off_high >= -15.0
     )
+    values["N (Near 52w high)"] = (
+        f"{pct_off_high:.1f}% off high"
+        if pct_off_high is not None
+        else "—"
+    )
 
     # S — Supply/Demand via the Acc/Dis grade
     checks["S (Acc/Dis A or B)"] = (
         rec["Acc/Dis Grade"] in ("A", "B")
     )
+    values["S (Acc/Dis A or B)"] = rec["Acc/Dis Grade"]
 
     # L — Leader: RS Rating >= 70
     checks["L (RS Rating >= 70)"] = (
         rec["raw_rs"] >= 70
     )
+    values["L (RS Rating >= 70)"] = f"{rec['raw_rs']}/99"
 
     # I — institutional sponsorship: genuinely not available
     checks["I (Institutional)"] = None
+    values["I (Institutional)"] = "N/A"
 
     # M — market direction: global, same value for every stock
     checks["M (Market direction)"] = (
         market_info["bullish"]
         if market_info is not None
         else None
+    )
+    values["M (Market direction)"] = (
+        ("Bullish" if market_info["bullish"] else "Unfavorable")
+        if market_info is not None
+        else "—"
     )
 
     # ROE — O'Neil's studied winners averaged ~17%+
@@ -986,29 +1037,45 @@ def evaluate_qualification(rec, market_info):
         if roe is not None
         else None
     )
+    values["ROE >= 17%"] = (
+        f"{roe * 100:.1f}%"
+        if roe is not None
+        else "—"
+    )
 
     # Trend Template (Minervini) — 7 published numeric criteria,
     # all must pass for a confirmed Stage-2 uptrend
     checks["Trend Template (Minervini, 7 criteria)"] = (
         rec["trend_template_pass"]
     )
+    values["Trend Template (Minervini, 7 criteria)"] = (
+        f"{rec['trend_template_score']}/7"
+    )
 
     # RSI — practitioner heuristic, NOT a named standard the way
     # Minervini's or IBD's numbers are: avoid stocks either broken
     # down (RSI < 40) or dangerously extended (RSI > 80)
     rsi = rec["rsi_latest"]
+    rsi_valid = (
+        rsi is not None
+        and not (isinstance(rsi, float) and pd.isna(rsi))
+    )
     checks["RSI healthy (40-80, heuristic)"] = (
         40.0 <= rsi <= 80.0
-        if rsi is not None and not (
-            isinstance(rsi, float) and pd.isna(rsi)
-        )
+        if rsi_valid
         else None
+    )
+    values["RSI healthy (40-80, heuristic)"] = (
+        f"{rsi:.1f}" if rsi_valid else "—"
     )
 
     # MACD — momentum confirmation, also a heuristic, not a
     # CANSLIM/Minervini-named rule
     checks["MACD bullish (heuristic)"] = (
         rec["macd_bullish"]
+    )
+    values["MACD bullish (heuristic)"] = (
+        "Above signal" if rec["macd_bullish"] else "Below signal"
     )
 
     # Liquidity — ChartMill's published CANSLIM screen config uses
@@ -1018,6 +1085,9 @@ def evaluate_qualification(rec, market_info):
         avg_vol >= 100_000
         if avg_vol is not None
         else None
+    )
+    values["Liquidity (avg vol >= 100k)"] = (
+        f"{avg_vol:,.0f}" if avg_vol is not None else "—"
     )
 
     computable = [
@@ -1037,7 +1107,9 @@ def evaluate_qualification(rec, market_info):
     else:
         status = "Insufficient data"
 
-    return checks, status
+    go_ahead = (status == "Qualified")
+
+    return checks, values, status, go_ahead
 
 
 # ============================================================
@@ -1052,42 +1124,37 @@ market_direction = check_market_direction()
 
 
 # ============================================================
-# SIDEBAR
+# CONTROL BAR (replaces the sidebar — stock picker, search,
+# theme toggle, and system status, all on the main page)
 # ============================================================
 
-with st.sidebar:
+control_col1, control_col2, control_col3, control_col4 = st.columns(
+    [2, 2, 1, 2]
+)
 
-    st.markdown("## 🦅 Intelligence Terminal")
-
-    st.caption(
-        "Select a stock to open its full intelligence file."
+# FIX: same ranking-order fix as before — the dropdown default
+# should reflect actual ML Probability ranking, not the order
+# tickers happen to sit in CORE_POOL.
+if not df_ranking.empty:
+    available_stocks = [
+        t for t in df_ranking["Ticker"].tolist()
+        if t in master_records
+    ]
+    available_stocks += [
+        t for t in master_records.keys()
+        if t not in available_stocks
+    ]
+else:
+    available_stocks = list(
+        master_records.keys()
     )
 
-    # FIX: this used to default to whichever ticker happened to be
-    # first in the hardcoded CORE_POOL list (always SYRMA.NS),
-    # completely unrelated to its actual ranking — misleadingly
-    # making it look like a top pick. Ordering by df_ranking (best
-    # ML Probability first) means the default selection, and the
-    # dropdown order itself, actually reflects the ranking.
-    if not df_ranking.empty:
-        available_stocks = [
-            t for t in df_ranking["Ticker"].tolist()
-            if t in master_records
-        ]
-        # any tickers not in df_ranking (e.g. added via search)
-        available_stocks += [
-            t for t in master_records.keys()
-            if t not in available_stocks
-        ]
-    else:
-        available_stocks = list(
-            master_records.keys()
-        )
+with control_col1:
 
     if available_stocks:
 
         selected_stock = st.selectbox(
-            "Stock",
+            "📊 Stock",
             available_stocks
         )
 
@@ -1095,12 +1162,10 @@ with st.sidebar:
 
         selected_stock = None
 
-    st.markdown("---")
-
-    st.markdown("### 🔎 Direct Search")
+with control_col2:
 
     search_query = st.text_input(
-        "NSE ticker",
+        "🔎 Search NSE ticker",
         placeholder="Example: HAL.NS"
     ).strip().upper()
 
@@ -1140,24 +1205,25 @@ with st.sidebar:
                     "Ticker not found."
                 )
 
-    st.markdown("---")
+with control_col3:
 
-    st.markdown("### System")
-
-    st.write(
-        "🟢 Market data connected"
+    new_theme = st.radio(
+        "⚙️ Theme",
+        ["Dark", "Light"],
+        index=0 if st.session_state.theme == "Dark" else 1,
+        horizontal=True
     )
 
-    st.write(
-        f"📊 {len(master_records)} stocks loaded"
-    )
+    if new_theme != st.session_state.theme:
 
-    st.write(
-        "🤖 ML engine active"
-    )
+        st.session_state.theme = new_theme
+        st.rerun()
 
-    st.write(
-        "🔄 Data refresh: 15 min"
+with control_col4:
+
+    st.caption(
+        f"🟢 Connected · 📊 {len(master_records)} stocks loaded · "
+        "🤖 ML active · 🔄 Refresh: 15 min"
     )
 
 
@@ -1306,28 +1372,33 @@ st.caption(
     "**A** (Annual earnings CAGR) and **I** (Institutional sponsorship) "
     "are shown as N/A — this data isn't available from this data source "
     "for NSE tickers, so they're left honestly blank rather than "
-    "approximated or guessed."
+    "approximated or guessed. Each cell shows the actual measured "
+    "number, with the pass/fail verdict alongside it — not just a "
+    "bare tick or cross."
 )
 
 qualification_rows = []
 
 for ticker, rec in master_records.items():
 
-    checks, status = evaluate_qualification(
+    checks, values, status, go_ahead = evaluate_qualification(
         rec,
         market_direction
     )
 
-    def fmt(v):
+    def cell(k):
+        v = checks[k]
+        val_text = values[k]
         if v is None:
-            return "N/A"
-        return "✅" if v else "❌"
+            return val_text
+        mark = "✅" if v else "❌"
+        return f"{val_text} {mark}"
 
     qualification_rows.append({
         "Ticker": ticker,
+        **{k: cell(k) for k in checks.keys()},
         "Status": status,
-        "Trend Score": f"{rec['trend_template_score']}/7",
-        **{k: fmt(v) for k, v in checks.items()}
+        "Go Ahead": "✅" if go_ahead else "❌"
     })
 
 if qualification_rows:
@@ -1746,55 +1817,98 @@ if pd.isna(recent_atr):
     )
 
 
+# ------------------------------------------------------------
+# FIX: the previous forecast path was a perfectly smooth
+# straight-line interpolation from today's price to the model's
+# predicted endpoint — nothing like how a real chart actually
+# moves, and misleadingly implied a guaranteed, frictionless
+# glide path with no day-to-day pullbacks. This version generates
+# a genuine day-by-day path using the stock's own trailing 60-day
+# volatility (so the *shape* of the move reflects how this stock
+# actually trades), then rescales the steps so their cumulative
+# move still lands exactly on the ML model's predicted return —
+# the destination is still the model's forecast; only the path
+# getting there is now grounded in real historical movement
+# instead of a straight line. Seeded deterministically per-ticker
+# (same approach as the Group Rank fix) so it doesn't reshuffle on
+# every rerun within the same cache window.
+# ------------------------------------------------------------
+
+log_returns = np.log(
+    df_chart["Close"] / df_chart["Close"].shift(1)
+).dropna().tail(60)
+
+daily_vol = float(log_returns.std())
+
+if pd.isna(daily_vol) or daily_vol <= 0:
+    daily_vol = 0.01
+
+_seed = int(
+    hashlib.md5(
+        selected_stock.encode("utf-8")
+    ).hexdigest(),
+    16
+) % (2 ** 32)
+
+_rng = np.random.default_rng(_seed)
+
+raw_log_steps = _rng.normal(
+    0,
+    daily_vol,
+    future_steps
+)
+
+target_log_return = np.log(
+    max(1 + predicted_return, 1e-6)
+)
+
+# Rescale so the cumulative path exactly matches the model's
+# predicted return, while keeping the day-to-day shape of the
+# historical-volatility noise intact
+_correction = (
+    target_log_return
+    - raw_log_steps.sum()
+) / future_steps
+
+adjusted_log_steps = raw_log_steps + _correction
+
+
 forecast_open = []
 forecast_high = []
 forecast_low = []
 forecast_close = []
 
 
-previous_close = current_price
+path_price = current_price
 
 
 for i in range(
     future_steps
 ):
 
-    progress = (
-        (i + 1)
-        / future_steps
+    open_price = path_price
+
+    step_return = float(
+        adjusted_log_steps[i]
     )
 
     target_close = (
-        current_price
-        * (
-            1
-            + predicted_return
-            * progress
-        )
+        open_price
+        * np.exp(step_return)
     )
 
-    # Smooth transition
-    if i == 0:
-
-        open_price = current_price
-
-    else:
-
-        open_price = forecast_close[-1]
-
-    movement = (
-        target_close
-        - open_price
+    # Each day's own move contributes to its wick on top of the
+    # stock's recent typical range and the volatility model's own
+    # predicted range — a bigger single-day move gets a
+    # proportionally bigger wick instead of a fixed-size one.
+    day_move = abs(
+        target_close - open_price
     )
 
-    # FIX: predicted_range (the volatility model's output) was
-    # computed but never actually used anywhere — wick size now
-    # blends the recent ATR with the model's own predicted range,
-    # so the forecast candles reflect the volatility model instead
-    # of ignoring it.
     wick_size = max(
-        recent_atr * 0.45,
-        current_price * predicted_range * 0.5,
+        recent_atr * 0.35,
+        current_price * predicted_range * 0.4,
+        day_move * 0.6,
         current_price * 0.002
     )
 
@@ -1823,6 +1937,8 @@ for i in range(
     forecast_close.append(
         target_close
     )
+
+    path_price = target_close
 
 
 # ============================================================
