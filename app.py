@@ -1004,9 +1004,26 @@ with st.sidebar:
         "Select a stock to open its full intelligence file."
     )
 
-    available_stocks = list(
-        master_records.keys()
-    )
+    # FIX: this used to default to whichever ticker happened to be
+    # first in the hardcoded CORE_POOL list (always SYRMA.NS),
+    # completely unrelated to its actual ranking — misleadingly
+    # making it look like a top pick. Ordering by df_ranking (best
+    # ML Probability first) means the default selection, and the
+    # dropdown order itself, actually reflects the ranking.
+    if not df_ranking.empty:
+        available_stocks = [
+            t for t in df_ranking["Ticker"].tolist()
+            if t in master_records
+        ]
+        # any tickers not in df_ranking (e.g. added via search)
+        available_stocks += [
+            t for t in master_records.keys()
+            if t not in available_stocks
+        ]
+    else:
+        available_stocks = list(
+            master_records.keys()
+        )
 
     if available_stocks:
 
@@ -2284,17 +2301,44 @@ metric_card(
 
 st.markdown("---")
 
-st.markdown("### 💬 Stock Intelligence Chat")
+chat_header_col, chat_clear_col = st.columns([5, 1])
 
-st.caption(
-    f"Ask questions about **{selected_stock}**. "
-    "The answers below are generated from the currently loaded market data and technical calculations."
-)
+with chat_header_col:
+
+    st.markdown("### 💬 Stock Intelligence Chat")
+
+    st.caption(
+        f"Ask questions about **{selected_stock}**. "
+        "The answers below are generated from the currently loaded market data and technical calculations."
+    )
+
+with chat_clear_col:
+
+    st.markdown("")
+    st.markdown("")
+
+    if st.button(
+        "🗑️ Clear chat",
+        use_container_width=True
+    ):
+
+        st.session_state.chat_history = []
+        st.rerun()
 
 
 if "chat_history" not in st.session_state:
 
     st.session_state.chat_history = []
+
+# FIX: the conversation used to persist across stock switches, so
+# asking a fresh question after changing the sidebar selection could
+# show old answers mixed in about a completely different ticker.
+# Tracking which stock the chat is "about" and auto-resetting when
+# it changes keeps every conversation scoped to one stock.
+if st.session_state.get("chat_stock") != selected_stock:
+
+    st.session_state.chat_history = []
+    st.session_state.chat_stock = selected_stock
 
 
 question = st.chat_input(
