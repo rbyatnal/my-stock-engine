@@ -15,7 +15,7 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 # ============================================================
 
 st.set_page_config(
-    page_title="CANSLIM Intelligence",
+    page_title="Rakshit's CANSLIM Terminal",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -98,8 +98,21 @@ st.markdown(
         opacity: 1 !important;
     }}
 
+    /* Streamlit's own in-app header bar (the hamburger-menu strip)
+       sits directly above our custom topbar with its own default
+       height/background, making the two look like they're crowding
+       each other. Shrinking and making it transparent removes that
+       crowding. Note: this only affects the in-app header — the
+       "Fork / GitHub" bar above it is Streamlit Community Cloud's
+       own hosting chrome, outside the app's DOM entirely, and
+       cannot be changed from app.py. */
+    header[data-testid="stHeader"] {{
+        background: transparent !important;
+        height: 2.5rem !important;
+    }}
+
     .block-container {{
-        padding-top: 1.2rem;
+        padding-top: 1rem;
         padding-bottom: 2rem;
         max-width: 1600px;
     }}
@@ -341,7 +354,7 @@ cube_html = (
 _topbar_shell = textwrap.dedent(f"""
     <div class="topbar">
         <div>
-            <div class="brand">🦅 CANSLIM Intelligence</div>
+            <div class="brand">🦅 Rakshit's CANSLIM Terminal</div>
             <div class="brand-small">
                 Market analytics • Pattern intelligence • Technical research
             </div>
