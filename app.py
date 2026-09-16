@@ -79,6 +79,25 @@ st.markdown(
         border-right: 1px solid {BORDER};
     }}
 
+    /* FIX: st.write() lines (e.g. the "System" status list) render
+       as <p> tags with Streamlit's own muted secondary-text color,
+       which was never overridden — only headings (h1-h3) were.
+       Scoped to markdown-container paragraphs specifically, so
+       buttons/inputs/dropdowns (which need their own contrast
+       rules) are untouched. */
+    [data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p,
+    [data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] span,
+    [data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] li {{
+        color: {TEXT} !important;
+        opacity: 1 !important;
+    }}
+
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] div[data-testid="stCaptionContainer"] p {{
+        color: {MUTED} !important;
+        opacity: 1 !important;
+    }}
+
     .block-container {{
         padding-top: 1.2rem;
         padding-bottom: 2rem;
