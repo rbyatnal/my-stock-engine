@@ -1,10 +1,28 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from datetime import datetime
+
 # ============================================================
-# FIXED HEADER & CONTRAST CSS
+# PAGE CONFIG (MUST BE THE VERY FIRST STREAMLIT CALL)
+# ============================================================
+st.set_page_config(
+    layout="wide",
+    page_title="Rakshits-Insights-Terminal"
+)
+
+# ============================================================
+# SESSION STATE INITIALIZATION
 # ============================================================
 if "theme" not in st.session_state:
     st.session_state.theme = "Black"
 
-# Dynamic theme colors
+# ============================================================
+# DYNAMIC STYLING & CONTRAST CSS
+# ============================================================
 BG = "#0E1117" if st.session_state.theme == "Black" else "#FFFFFF"
 TEXT = "#FFFFFF" if st.session_state.theme == "Black" else "#111111"
 PANEL = "#161B22" if st.session_state.theme == "Black" else "#F5F5F5"
@@ -33,7 +51,7 @@ st.markdown(
         display: flex;
         align-items: center;
         gap: 12px;
-        margin-bottom: 20px;
+        margin-bottom: 10px;
     }}
     .title-text {{
         font-size: 24px;
@@ -46,7 +64,7 @@ st.markdown(
         color: {LABEL_COLOR} !important;
     }}
 
-    /* FIXED: Explicitly style Streamlit Metrics for high contrast */
+    /* Explicit styling for Streamlit Metrics */
     div[data-testid="metric-container"] {{
         background-color: {PANEL} !important;
         border: 1px solid {BORDER} !important;
@@ -79,7 +97,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Render isolated Header Row with vertical separation
+# ============================================================
+# HEADER ROW
+# ============================================================
 header_col, toggle_col = st.columns([9, 1])
 
 with header_col:
