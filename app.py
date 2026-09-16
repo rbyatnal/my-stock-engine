@@ -18,25 +18,26 @@ st.set_page_config(
 if "theme" not in st.session_state:
     st.session_state.theme = "Black"
 
-# Dynamic theme colors
+# Dynamic styling variables
 BG = "#0E1117" if st.session_state.theme == "Black" else "#FFFFFF"
 TEXT = "#FFFFFF" if st.session_state.theme == "Black" else "#111111"
 PANEL = "#161B22" if st.session_state.theme == "Black" else "#F8F9FA"
 BORDER = "#30363D" if st.session_state.theme == "Black" else "#E0E0E0"
+LABEL_COLOR = "#FFFFFF" if st.session_state.theme == "Black" else "#111111"
 
 # ============================================================
-# 2. GLOBAL CSS INJECTION & HIGH-CONTRAST METRICS
+# 2. GLOBAL CSS INJECTION (FORCE WHITE METRIC HEADERS)
 # ============================================================
 st.markdown(
     f"""
     <style>
-    /* Unclip viewport & hide default header overlay */
+    /* Prevent top padding overlap with Streamlit toolbar */
     header[data-testid="stHeader"] {{
         background-color: transparent !important;
         z-index: 1;
     }}
     .block-container {{
-        padding-top: 3.5rem !important;
+        padding-top: 3rem !important;
         padding-bottom: 2rem !important;
     }}
     .stApp {{
@@ -44,7 +45,7 @@ st.markdown(
         color: {TEXT} !important;
     }}
 
-    /* Title Styling */
+    /* Header styling */
     .header-title {{
         font-size: 24px;
         font-weight: 800;
@@ -54,11 +55,11 @@ st.markdown(
     .header-subtitle {{
         font-size: 13px;
         font-weight: 400;
-        color: #00E5FF !important;
-        margin-left: 8px;
+        color: #A3B1C2 !important;
+        margin-left: 6px;
     }}
 
-    /* CARD CONTAINER STYLING */
+    /* Container Box Styling */
     div[data-testid="metric-container"] {{
         background-color: {PANEL} !important;
         border: 1px solid {BORDER} !important;
@@ -67,19 +68,19 @@ st.markdown(
         box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }}
 
-    /* TARGET ALL METRIC CARD HEADER NODES FOR HIGH VISIBILITY */
+    /* FORCE METRIC CARD HEADER LABELS TO SOLID WHITE */
     div[data-testid="stMetricLabel"],
     div[data-testid="stMetricLabel"] *,
     div[data-testid="stMetricLabel"] p,
     div[data-testid="stMetricLabel"] label,
     div[data-testid="stMetricLabel"] span {{
-        color: #00E5FF !important; /* Bright Cyan Label */
+        color: #FFFFFF !important;
         font-size: 14px !important;
         font-weight: 700 !important;
         opacity: 1 !important;
     }}
 
-    /* TARGET ALL METRIC VALUE NODES */
+    /* FORCE METRIC CARD VALUES TO SOLID WHITE */
     div[data-testid="stMetricValue"],
     div[data-testid="stMetricValue"] *,
     div[data-testid="stMetricValue"] div {{
@@ -89,7 +90,7 @@ st.markdown(
         opacity: 1 !important;
     }}
 
-    /* Selectbox & Input Contrast */
+    /* Dropdown & Input styling */
     div[data-baseweb="select"] > div {{
         background-color: {PANEL} !important;
         color: {TEXT} !important;
@@ -111,7 +112,7 @@ head_col1, head_col2 = st.columns([8, 2])
 
 with head_col1:
     st.markdown(
-        """
+        f"""
         <div>
             <span class="header-title">Rakshits-Insights-Terminal</span>
             <span class="header-subtitle">(CAN SLIM Quantitative Intelligence)</span>
@@ -247,7 +248,7 @@ def execute_quant_pipeline(tickers, interval, period):
 with st.spinner("Fetching market feed & computing metrics..."):
     df_ranking, master_records = execute_quant_pipeline(DYNAMIC_UNIVERSE, selected_config["interval"], selected_config["period"])
 
-# Display Ranking Table
+# Display Ranking
 st.subheader(f"📊 Top Ranked Candidates — {timeframe}")
 if not df_ranking.empty:
     st.dataframe(
