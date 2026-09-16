@@ -70,15 +70,11 @@ def professional_ml_pipeline(tickers):
             clf = RandomForestClassifier(n_estimators=40, max_depth=5, random_state=42)
             clf.fit(X_ml[:-5], y_ml[:-5])
             
-            # SAFE EXTRACTION OF MATRIX PROBABILITY VALUES
+            # FIXED EXTRACTION LINE: Target matrix column explicitly to prevent float crashes
             prob_higher_array = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))
-            try:
-                # Safely parse nested shape vectors whether multi-class or flat arrays are output
-                if prob_higher_array.ndim > 1 and prob_higher_array.shape[1] > 1:
-                    prob_higher = float(prob_higher_array[0][1] * 100)
-                else:
-                    prob_higher = float(prob_higher_array[0][0] * 100)
-            except:
+            if prob_higher_array.shape[1] == 2:
+                prob_higher = float(prob_higher_array[0][1] * 100)
+            else:
                 prob_higher = 50.0
             
             raw_metrics.append({
@@ -189,7 +185,7 @@ if active_selection and active_selection in master_records:
     
     # Force anchor alignment to connect flawlessly to the final candle
     current_close = float(df_chart['Close'].iloc[-1])
-    gap_offset = current_close - future_y_pred[0]
+    gap_offset = current_close - future_y_pred
     future_y_aligned = future_y_pred + gap_offset
     
     # Generate calendar projection mapping out future sessions
@@ -197,3 +193,4 @@ if active_selection and active_selection in master_records:
 
     # Interactive Graph View
     fig = go.Figure()
+    fig.add_trace(go.Candlestick(x=df_chart.index[-60:], open=df_chart['Open'].iloc[-60:], high=df_chart['High'].iloc[-60:], low=df_chart['Low'].iloc[-60:], close=df_chart['Close'].iloc[-60:], name="Price Candles"))
