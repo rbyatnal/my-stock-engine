@@ -69,7 +69,10 @@ def professional_ml_pipeline(tickers):
             # Random Forest Dynamic Prediction Execution
             clf = RandomForestClassifier(n_estimators=40, max_depth=5, random_state=42)
             clf.fit(X_ml[:-5], y_ml[:-5])
-            prob_higher = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]])) * 100
+            
+            # Extract only the explicit upward movement probability value float
+            prob_higher_array = clf.predict_proba(np.array([df_features[feature_cols].iloc[-1]]))[0]
+            prob_higher = float(prob_higher_array[1] * 100) if len(prob_higher_array) > 1 else 50.0
             
             raw_metrics.append({
                 "ticker": t, "hist": hist, "current_price": current_price, "pivot_price": pivot_price,
@@ -110,12 +113,12 @@ def professional_ml_pipeline(tickers):
             "ML Probability": f"{row['ml_prob']:.1f}%", "Status": status,
             "raw_pivot": row['pivot_price'], "raw_hist": row['hist'],
             "raw_master_score": row['Master Score'], "raw_eps": row['EPS Rating'], "raw_rs": row['Price Strength (RS)'],
-            "raw_group": group_rank, "raw_pivot_delta": row['pct_from_pivot']
+            "raw_group": group_rank, "raw_pivot_delta": row['pct_from_pivot'], "raw_ml_prob": row['ml_prob']
         }
         final_grid_data.append(rec)
         records_dictionary[t] = rec
         
-    df_sorted = pd.DataFrame(final_grid_data).sort_values(by="ML Probability", ascending=False)
+    df_sorted = pd.DataFrame(final_grid_data).sort_values(by="raw_ml_prob", ascending=False)
     return df_sorted, records_dictionary
 
 # Execute Analytics Processing Pipeline
@@ -146,9 +149,9 @@ if search_query:
                 st.error("Invalid ticker code syntax. Ensure '.NS' is added at the end.")
 else:
     if list(master_records.keys()):
-        active_selection = list(master_records.keys())
+        active_selection = list(master_records.keys())[0]
 
-# --- SECTION 3: CORE VISUAL CARDS SCOREBOARD & INTEGRATED TREND CONTINUUM ---
+# --- SECTION 3: THE RESTORED CORE VISUAL CARDS SCOREBOARD & INTEGRATED TREND CONTINUUM ---
 if active_selection and active_selection in master_records:
     s = master_records[active_selection]
     
@@ -167,7 +170,6 @@ if active_selection and active_selection in master_records:
     # --- THE BACKEND PATTERN CONTINUATION ENGINE ---
     df_chart = s['raw_hist'].copy()
     
-    # Isolate last 20 candles to extract immediate speed vector
     df_chart['Day_Index'] = np.arange(len(df_chart))
     X_train = df_chart[['Day_Index']].values[-20:]
     y_train = df_chart['Close'].values[-20:]
@@ -175,10 +177,10 @@ if active_selection and active_selection in master_records:
     vector_model = LinearRegression().fit(X_train, y_train)
     
     # Project 5 Days forward from the very last candlestick's position
-    future_x = np.array([[len(df_chart) + i] for i in range(0, 6)]) # Start at 0 to connect seamlessly to the last candle
+    future_x = np.array([[len(df_chart) + i] for i in range(0, 6)])
     future_y = vector_model.predict(future_x)
     
-    # Overwrite index 0 to seamlessly anchor onto the true closing price of the final candle
+    # Anchor onto the true closing price of the final candle
     future_y[0] = df_chart['Close'].iloc[-1]
     
     # Generate calendar projection mapping out future sessions
@@ -186,9 +188,6 @@ if active_selection and active_selection in master_records:
 
     # Interactive Graph View
     fig = go.Figure()
-    # Candlestick Array
     fig.add_trace(go.Candlestick(x=df_chart.index[-60:], open=df_chart['Open'].iloc[-60:], high=df_chart['High'].iloc[-60:], low=df_chart['Low'].iloc[-60:], close=df_chart['Close'].iloc[-60:], name="Price Candles"))
-    # Flat Pivot Resistance High
     fig.add_trace(go.Scatter(x=df_chart.index[-60:], y=[s['raw_pivot']]*60, mode='lines', name='Breakout Pivot Line', line=dict(color='orange', width=2, dash='dot')))
     
-    # HIGH-CONTRAST SEAMLESS ML DIRECTION VECTOR LINE
