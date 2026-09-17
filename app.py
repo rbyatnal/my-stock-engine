@@ -6,6 +6,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
@@ -435,7 +436,16 @@ def professional_ml_pipeline(tickers):
             stock = yf.Ticker(t)
             hist = stock.history(period="2y")
 
-            if hist.empty or len(hist) < 200:
+            # FIX: this required 200 trading days minimum, silently
+            # skipping the ticker entirely (with no explanation shown
+            # anywhere) if it had less — which excluded every recently
+            # listed IPO outright, even ones found successfully via
+            # name search. Lowered to 30 (enough for RSI/MACD/short
+            # MAs to mean something); the longer lookbacks below
+            # (6/9/12-month returns, 150/200-day trend template) are
+            # now individually guarded to degrade to "not available
+            # yet" instead of requiring 200 days for everything.
+            if hist.empty or len(hist) < 30:
                 continue
 
             hist = hist.dropna(
@@ -457,30 +467,58 @@ def professional_ml_pipeline(tickers):
             #   RS Score = 0.4*r3mo + 0.2*r6mo + 0.2*r9mo + 0.2*r12mo
             # (confirmed against IBD's own published methodology and
             # multiple independent replications of it).
+            #
+            # FIX: a stock with less than 252 trading days (any recent
+            # IPO) used to crash here (cp.iloc[-252] on a shorter
+            # series raises IndexError), which the outer except
+            # silently turned into "skip this ticker entirely" with
+            # zero explanation. Each window now only contributes if
+            # there's enough history for it; the weighted average
+            # renormalizes over whichever windows are actually
+            # available instead of requiring all four.
             # ------------------------------------------------
 
-            r3mo = (
-                current_price - cp.iloc[-63]
-            ) / cp.iloc[-63]
+            def _trailing_return(series, days_back):
+                if len(series) <= days_back:
+                    return None
+                base = series.iloc[-days_back - 1]
+                if base == 0:
+                    return None
+                return (series.iloc[-1] - base) / base
 
-            r6mo = (
-                current_price - cp.iloc[-126]
-            ) / cp.iloc[-126]
+            r3mo = _trailing_return(cp, 63)
+            r6mo = _trailing_return(cp, 126)
+            r9mo = _trailing_return(cp, 189)
+            r12mo = _trailing_return(cp, 252)
 
-            r9mo = (
-                current_price - cp.iloc[-189]
-            ) / cp.iloc[-189]
+            _momentum_components = [
+                (r3mo, 0.40),
+                (r6mo, 0.20),
+                (r9mo, 0.20),
+                (r12mo, 0.20)
+            ]
 
-            r12mo = (
-                current_price - cp.iloc[-252]
-            ) / cp.iloc[-252]
+            _available = [
+                (r, w) for r, w in _momentum_components
+                if r is not None
+            ]
+
+            if not _available:
+                # Not even 3 months of history — too little for any
+                # momentum read at all.
+                continue
+
+            _total_weight = sum(w for _, w in _available)
 
             weighted_momentum = (
-                r3mo * 0.40
-                + r6mo * 0.20
-                + r9mo * 0.20
-                + r12mo * 0.20
+                sum(r * w for r, w in _available)
+                / _total_weight
             )
+
+            # r3mo is reused below (eps_raw fallback) — guarantee it's
+            # a real number even for a brand-new listing under 63 days
+            if r3mo is None:
+                r3mo = weighted_momentum
 
             delta_price = cp.diff()
             vol = hist["Volume"]
@@ -519,10 +557,30 @@ def professional_ml_pipeline(tickers):
                 roe_raw = info.get("returnOnEquity", None)
                 debt_equity_raw = info.get("debtToEquity", None)
 
+                # Value factor (Stockopedia-style) — P/E and P/B,
+                # percentile-ranked below like everything else. Not
+                # a redundant fifth copy of EPS/RS: cheap-vs-expensive
+                # is empirically a different signal from growth/momentum.
+                pe_raw = info.get("trailingPE", None)
+                pb_raw = info.get("priceToBook", None)
+
+                # Estimate revisions (Zacks-style). Disclosed up front:
+                # Yahoo's analyst-estimate fields are thin for NSE
+                # tickers — this often comes back N/A, not a full
+                # Zacks-style revision history.
+                analyst_target = info.get("targetMeanPrice", None)
+                analyst_count = info.get("numberOfAnalystOpinions", None)
+                recommendation_mean = info.get("recommendationMean", None)
+
             except Exception:
                 eps_raw = r3mo * 0.5
                 roe_raw = None
                 debt_equity_raw = None
+                pe_raw = None
+                pb_raw = None
+                analyst_target = None
+                analyst_count = None
+                recommendation_mean = None
 
             # ------------------------------------------------
             # A — ANNUAL EPS GROWTH, computed from yfinance's own
@@ -868,6 +926,14 @@ def professional_ml_pipeline(tickers):
 
                 prob_higher = 50.0
 
+            # Real, computed feature importances (Gini-based) — not a
+            # hand-set weighting. A Random Forest doesn't have fixed
+            # coefficients like "RSI=30%"; this is what the trained
+            # trees actually ended up relying on for THIS stock.
+            ml_feature_importances = dict(
+                zip(feature_cols, clf.feature_importances_.tolist())
+            )
+
             raw_metrics.append({
 
                 "ticker": t,
@@ -880,8 +946,14 @@ def professional_ml_pipeline(tickers):
                 "raw_eps": eps_raw,
                 "pct_off_high": pct_off_high,
                 "ml_prob": prob_higher,
+                "ml_feature_importances": ml_feature_importances,
                 "roe": roe_raw,
                 "debt_equity": debt_equity_raw,
+                "pe_ratio": pe_raw,
+                "pb_ratio": pb_raw,
+                "analyst_target": analyst_target,
+                "analyst_count": analyst_count,
+                "recommendation_mean": recommendation_mean,
                 "annual_eps_cagr": annual_eps_cagr,
                 "fundamentals_error": fundamentals_error,
                 "sales_growth_cagr": sales_growth_cagr,
@@ -950,6 +1022,40 @@ def professional_ml_pipeline(tickers):
             return "E"
 
     df["SMR Rating"] = df["smr_percentile"].apply(_smr_grade)
+
+    # ------------------------------------------------------------
+    # VALUE RANK (Stockopedia-style) — cheap vs. expensive, ranked
+    # the opposite direction from everything else: a LOWER P/E or
+    # P/B is better, so we rank pct on the negated value. NaN (Yahoo
+    # has no P/E for this ticker) is skipped by rank(pct=True)
+    # automatically, same as every other optional field in this app.
+    #
+    # FIX: when every ticker in the batch has pe_ratio/pb_ratio as
+    # None (e.g. testing a single stock, or a batch where Yahoo
+    # returned nothing for any of them), pandas keeps that column as
+    # object dtype instead of float — and "-None" raises TypeError,
+    # crashing the whole pipeline. pd.to_numeric coerces None/missing
+    # to a real NaN first, which negates and ranks safely either way.
+    # ------------------------------------------------------------
+
+    pe_numeric = pd.to_numeric(df["pe_ratio"], errors="coerce")
+    pb_numeric = pd.to_numeric(df["pb_ratio"], errors="coerce")
+
+    pe_rank = (-pe_numeric).rank(pct=True)
+    pb_rank = (-pb_numeric).rank(pct=True)
+
+    df["value_percentile"] = (
+        pd.concat([pe_rank, pb_rank], axis=1)
+        .mean(axis=1, skipna=True)
+    )
+
+    df["Value Rank"] = (
+        df["value_percentile"] * 98 + 1
+    ).round()
+
+    df["Value Rank"] = df["Value Rank"].where(
+        df["value_percentile"].notna(), other=np.nan
+    )
 
     df["Master Score"] = (
         df["Price Strength (RS)"] * 0.5
@@ -1048,6 +1154,16 @@ def professional_ml_pipeline(tickers):
             "SMR Rating":
                 row["SMR Rating"],
 
+            "Value Rank":
+                (
+                    f"{int(row['Value Rank'])}/99"
+                    if pd.notna(row["Value Rank"])
+                    else "N/A"
+                ),
+
+            "raw_pe": row["pe_ratio"],
+            "raw_pb": row["pb_ratio"],
+
             "Composite Rating":
                 f"{row['Composite Rating']}/99",
 
@@ -1086,6 +1202,9 @@ def professional_ml_pipeline(tickers):
 
             "raw_ml_prob":
                 row["ml_prob"],
+
+            "ml_feature_importances":
+                row["ml_feature_importances"],
 
             "pct_off_high":
                 row["pct_off_high"],
@@ -2011,127 +2130,24 @@ with hero_col2:
 
 
 # ============================================================
-# COMPARATIVE PERFORMANCE MATRIX (restored — this table was
-# dropped during an earlier UI rebuild without being flagged)
+# PAGE MAP — a quick index so the page reads as one connected
+# flow instead of a scatter of sections
 # ============================================================
 
-st.markdown("### 📋 Comparative Performance Matrix")
+with st.expander("🗺️ What's on this page"):
 
-st.caption(
-    "All loaded stocks, ranked by ML Probability. "
-    "Select a stock below or in the sidebar for its full detail view."
-)
-
-if not df_ranking.empty:
-
-    st.dataframe(
-        df_ranking[
-            [
-                "Ticker",
-                "Price",
-                "Composite Rating",
-                "ML Probability",
-                "Master Score",
-                "EPS Rating",
-                "Price Strength (RS)",
-                "SMR Rating",
-                "Group Rank",
-                "Acc/Dis Grade",
-                "Pivot Delta",
-                "Status"
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ============================================================
-# CAN SLIM QUALIFICATION SCREEN
-# ============================================================
-
-st.markdown("### 🧪 CAN SLIM Qualification Screen")
-
-if market_direction is not None:
-
-    market_status_text = (
-        "🟢 Bullish — NIFTY 50 above its 50-day and 200-day average"
-        if market_direction["bullish"]
-        else "🔴 Unfavorable — NIFTY 50 below its 50-day and/or 200-day average"
-    )
-
-    st.info(
-        f"**M — Market Direction:** {market_status_text}  "
-        f"(NIFTY 50: ₹{market_direction['price']:.2f} · "
-        f"50-day avg: ₹{market_direction['ma50']:.2f} · "
-        f"200-day avg: ₹{market_direction['ma200']:.2f})"
-    )
-
-else:
-
-    st.warning(
-        "M — Market Direction: could not be determined "
-        "(NIFTY 50 data unavailable)."
-    )
-
-st.caption(
-    f"Price floor: ₹{PRICE_FLOOR:.0f}. "
-    "**I** (Institutional sponsorship) is shown as N/A — that data "
-    "genuinely isn't available for NSE tickers from any free source. "
-    "**A** (Annual EPS CAGR) is computed from each ticker's own income "
-    "statement and shows N/A only for tickers with too little EPS "
-    "history on file. Each cell shows the actual measured number, "
-    "with the pass/fail verdict alongside it — not just a bare tick "
-    "or cross."
-)
-
-qualification_rows = []
-
-for ticker, rec in master_records.items():
-
-    checks, values, status, go_ahead = evaluate_qualification(
-        rec,
-        market_direction
-    )
-
-    def cell(k):
-        v = checks[k]
-        val_text = values[k]
-        if v is None:
-            return val_text
-        mark = "✅" if v else "❌"
-        return f"{val_text} {mark}"
-
-    qualification_rows.append({
-        "Ticker": ticker,
-        **{k: cell(k) for k in checks.keys()},
-        "Status": status,
-        "Go Ahead": "✅" if go_ahead else "❌"
-    })
-
-if qualification_rows:
-
-    qual_df = pd.DataFrame(qualification_rows)
-
-    status_order = {
-        "Qualified": 0,
-        "Watchlist": 1,
-        "Insufficient data": 2,
-        "Below price floor": 3
-    }
-
-    qual_df["_sort"] = qual_df["Status"].map(status_order)
-
-    qual_df = (
-        qual_df
-        .sort_values("_sort")
-        .drop(columns="_sort")
-    )
-
-    st.dataframe(
-        qual_df,
-        use_container_width=True,
-        hide_index=True
+    st.markdown(
+        "1. **Market Intelligence** — this stock's core scores at a glance\n"
+        "2. **Price Structure & ML Continuation** — the chart: history + forecast + volume\n"
+        "3. **Forecast Metrics** & **Technical Intelligence** — the numbers behind that chart\n"
+        "4. **Comparative Performance Matrix** — every loaded stock, ranked (use this to pick a different one)\n"
+        "5. **CAN SLIM Qualification Screen** — each stock checked against real thresholds, ending in a Go Ahead ✅/❌\n"
+        "6. **Advanced Signals** — 4 modes: Big Picture (market health), RS Line (relative strength trend), "
+        "Near Pivot/Breakouts (timing), Pattern Recognition (exact buy point)\n"
+        "7. **Stock Intelligence Chat** — ask about this stock in plain English\n"
+        "8. **Price Structure Reference** — quick current price / pivot / 52w high recap\n\n"
+        "Suggested reading order: 1-3 for the stock you searched → 6 (Big Picture first) to check the market → "
+        "6 again (the other 3 modes) to confirm → 4-5 to compare against other stocks → 7 if you have questions."
     )
 
 
@@ -2139,7 +2155,39 @@ if qualification_rows:
 # METRIC CARDS
 # ============================================================
 
-st.markdown("### Market Intelligence")
+def info_button(text):
+    """
+    Plain-English 'what is this and what's a good range' helper.
+    Uses st.popover where available (newer Streamlit); falls back
+    to an expander on older versions rather than erroring out.
+    """
+    if hasattr(st, "popover"):
+        with st.popover("ℹ️"):
+            st.markdown(text)
+    else:
+        with st.expander("ℹ️ What is this?"):
+            st.markdown(text)
+
+
+hcol1, hcol2 = st.columns([10, 1])
+
+with hcol1:
+    st.markdown("### Market Intelligence")
+
+with hcol2:
+    info_button(
+        "**Master Score** (0-99): overall CANSLIM-style strength — "
+        "higher is better, 75+ is strong.\n\n"
+        "**EPS Rating** (0-99): earnings growth percentile vs. this "
+        "list — 80+ is strong.\n\n"
+        "**Price Strength**: momentum percentile (real IBD RS formula) "
+        "— 70+ is a 'leader'.\n\n"
+        "**Group Rank**: this stock's position among the loaded list.\n\n"
+        "**Acc/Dis**: A/B = buying pressure (good), C = selling pressure.\n\n"
+        "**ML Probability**: model's estimated odds price is higher in "
+        "5 sessions — not a guarantee, see the Advanced Signals roadmap "
+        "for how this is trained."
+    )
 
 cols = st.columns(6)
 
@@ -2658,7 +2706,13 @@ chart_data = df_chart.tail(
 )
 
 
-fig = go.Figure()
+fig = make_subplots(
+    rows=2,
+    cols=1,
+    shared_xaxes=True,
+    row_heights=[0.75, 0.25],
+    vertical_spacing=0.03
+)
 
 
 # Historical candles
@@ -2682,7 +2736,8 @@ fig.add_trace(
 
         decreasing_line_color="#ea3943"
 
-    )
+    ),
+    row=1, col=1
 )
 
 
@@ -2704,7 +2759,8 @@ fig.add_trace(
             width=1.5
         )
 
-    )
+    ),
+    row=1, col=1
 )
 
 
@@ -2724,7 +2780,8 @@ fig.add_trace(
             width=1.5
         )
 
-    )
+    ),
+    row=1, col=1
 )
 
 
@@ -2748,7 +2805,8 @@ fig.add_trace(
 
         showlegend=False
 
-    )
+    ),
+    row=1, col=1
 )
 
 
@@ -2774,7 +2832,8 @@ fig.add_trace(
 
         showlegend=False
 
-    )
+    ),
+    row=1, col=1
 )
 
 
@@ -2799,7 +2858,36 @@ fig.add_trace(
             dash="dot"
         )
 
-    )
+    ),
+    row=1, col=1
+)
+
+
+# ============================================================
+# VOLUME SUBPLOT
+#
+# Added per request — without volume alongside the candles, there
+# was no way to tell whether a move (or a breakout) was backed by
+# real participation or not. Only historical bars get volume — the
+# ML forecast candles have no real future volume to show, so that
+# region is honestly left blank rather than faked.
+# ============================================================
+
+volume_colors = np.where(
+    chart_data["Close"] >= chart_data["Open"],
+    "#16c784",
+    "#ea3943"
+)
+
+fig.add_trace(
+    go.Bar(
+        x=chart_data.index,
+        y=chart_data["Volume"],
+        marker_color=volume_colors,
+        name="Volume",
+        showlegend=False
+    ),
+    row=2, col=1
 )
 
 
@@ -2859,7 +2947,8 @@ for i in range(
                 i == 0
             )
 
-        )
+        ),
+        row=1, col=1
     )
 
 
@@ -2889,7 +2978,8 @@ fig.add_trace(
 
         showlegend=False
 
-    )
+    ),
+    row=1, col=1
 )
 
 
@@ -2921,7 +3011,8 @@ fig.add_trace(
             color="#00d4ff"
         )
 
-    )
+    ),
+    row=1, col=1
 )
 
 
@@ -2938,7 +3029,7 @@ fig.update_layout(
         else "plotly_white"
     ),
 
-    height=600,
+    height=700,
 
     xaxis_rangeslider_visible=False,
 
@@ -2957,20 +3048,26 @@ fig.update_layout(
         y=1.01,
         xanchor="left",
         x=0
-    ),
-
-    xaxis=dict(
-        showgrid=False
-    ),
-
-    yaxis=dict(
-        showgrid=True,
-        gridcolor=(
-            "#252d3a"
-            if theme == "Dark"
-            else "#e5e7eb"
-        )
     )
+)
+
+fig.update_xaxes(showgrid=False, row=1, col=1)
+fig.update_xaxes(showgrid=False, row=2, col=1)
+
+fig.update_yaxes(
+    showgrid=True,
+    gridcolor=(
+        "#252d3a"
+        if theme == "Dark"
+        else "#e5e7eb"
+    ),
+    row=1, col=1
+)
+
+fig.update_yaxes(
+    showgrid=False,
+    title_text="Volume",
+    row=2, col=1
 )
 
 
@@ -2983,7 +3080,19 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.markdown("### 📈 Price Structure & ML Continuation")
+ccol1, ccol2 = st.columns([10, 1])
+with ccol1:
+    st.markdown("### 📈 Price Structure & ML Continuation")
+with ccol2:
+    info_button(
+        "**Candles**: green = up day, red = down day. Solid candles = "
+        "actual history; the last few candles are the ML forecast.\n\n"
+        "**MA 20 / MA 50 lines**: price consistently above both = "
+        "healthier trend.\n\n"
+        "**Orange dotted line**: the pivot (breakout) level.\n\n"
+        "**Volume bars below**: confirm moves — a breakout on low "
+        "volume is weaker than one on high volume."
+    )
 
 st.caption(
     "The highlighted candles after the latest market candle "
@@ -3067,7 +3176,20 @@ metric_card(
 # TECHNICAL DASHBOARD
 # ============================================================
 
-st.markdown("### 🔬 Technical Intelligence")
+tcol1, tcol2 = st.columns([10, 1])
+with tcol1:
+    st.markdown("### 🔬 Technical Intelligence")
+with tcol2:
+    info_button(
+        "**RSI** (0-100): momentum. Below 30 = oversold, above 70 = "
+        "overbought, 40-60 = neutral.\n\n"
+        "**MACD**: trend momentum — above its signal line = bullish.\n\n"
+        "**MA 20 / MA 50**: moving averages — price above both = uptrend.\n\n"
+        "**Volume Ratio**: today's volume vs. 20-day average — above "
+        "1.0x means unusually active.\n\n"
+        "**Pivot Delta**: distance from the breakout level — the "
+        "0% to +6% zone is the traditional 'buy zone'."
+    )
 
 latest = df_chart.iloc[-1]
 
@@ -3179,12 +3301,166 @@ metric_card(
 
 
 # ============================================================
+# COMPARATIVE PERFORMANCE MATRIX (restored — this table was
+# dropped during an earlier UI rebuild without being flagged)
+# ============================================================
+
+st.markdown("### 📋 Comparative Performance Matrix")
+
+st.caption(
+    "All loaded stocks, ranked by ML Probability. "
+    "Select a stock below or in the sidebar for its full detail view."
+)
+
+if not df_ranking.empty:
+
+    st.dataframe(
+        df_ranking[
+            [
+                "Ticker",
+                "Price",
+                "Composite Rating",
+                "ML Probability",
+                "Master Score",
+                "EPS Rating",
+                "Price Strength (RS)",
+                "SMR Rating",
+                "Value Rank",
+                "Group Rank",
+                "Acc/Dis Grade",
+                "Pivot Delta",
+                "Status"
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# ============================================================
+# CAN SLIM QUALIFICATION SCREEN
+# ============================================================
+
+qcol1, qcol2 = st.columns([10, 1])
+with qcol1:
+    st.markdown("### 🧪 CAN SLIM Qualification Screen")
+with qcol2:
+    info_button(
+        "Each column checks one CANSLIM letter against a real "
+        "threshold — the actual number is shown next to ✅/❌/N/A, "
+        "never a bare tick.\n\n"
+        "**Go Ahead ✅** only appears when every *computable* "
+        "criterion passes — N/A criteria (data genuinely unavailable) "
+        "don't block it, but a real ❌ does.\n\n"
+        "This is a screen, not a guarantee — see 'Feature roadmap' "
+        "above for what each rating actually measures."
+    )
+
+if market_direction is not None:
+
+    market_status_text = (
+        "🟢 Bullish — NIFTY 50 above its 50-day and 200-day average"
+        if market_direction["bullish"]
+        else "🔴 Unfavorable — NIFTY 50 below its 50-day and/or 200-day average"
+    )
+
+    st.info(
+        f"**M — Market Direction:** {market_status_text}  "
+        f"(NIFTY 50: ₹{market_direction['price']:.2f} · "
+        f"50-day avg: ₹{market_direction['ma50']:.2f} · "
+        f"200-day avg: ₹{market_direction['ma200']:.2f})"
+    )
+
+else:
+
+    st.warning(
+        "M — Market Direction: could not be determined "
+        "(NIFTY 50 data unavailable)."
+    )
+
+st.caption(
+    f"Price floor: ₹{PRICE_FLOOR:.0f}. "
+    "**I** (Institutional sponsorship) is shown as N/A — that data "
+    "genuinely isn't available for NSE tickers from any free source. "
+    "**A** (Annual EPS CAGR) is computed from each ticker's own income "
+    "statement and shows N/A only for tickers with too little EPS "
+    "history on file. Each cell shows the actual measured number, "
+    "with the pass/fail verdict alongside it — not just a bare tick "
+    "or cross."
+)
+
+qualification_rows = []
+
+for ticker, rec in master_records.items():
+
+    checks, values, status, go_ahead = evaluate_qualification(
+        rec,
+        market_direction
+    )
+
+    def cell(k):
+        v = checks[k]
+        val_text = values[k]
+        if v is None:
+            return val_text
+        mark = "✅" if v else "❌"
+        return f"{val_text} {mark}"
+
+    qualification_rows.append({
+        "Ticker": ticker,
+        **{k: cell(k) for k in checks.keys()},
+        "Status": status,
+        "Go Ahead": "✅" if go_ahead else "❌"
+    })
+
+if qualification_rows:
+
+    qual_df = pd.DataFrame(qualification_rows)
+
+    status_order = {
+        "Qualified": 0,
+        "Watchlist": 1,
+        "Insufficient data": 2,
+        "Below price floor": 3
+    }
+
+    qual_df["_sort"] = qual_df["Status"].map(status_order)
+
+    qual_df = (
+        qual_df
+        .sort_values("_sort")
+        .drop(columns="_sort")
+    )
+
+    st.dataframe(
+        qual_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# ============================================================
 # ADVANCED SIGNALS — roadmap + 4-mode toggle
 # ============================================================
 
 st.markdown("---")
 
-st.markdown("### 🚀 Advanced Signals")
+acol1, acol2 = st.columns([10, 1])
+with acol1:
+    st.markdown("### 🚀 Advanced Signals")
+with acol2:
+    info_button(
+        "**📈 Big Picture**: overall market health. Look for state = "
+        "'Confirmed Uptrend' or 'Power Trend'; avoid new buys if it "
+        "says 'Correction'. 5+ Distribution Days = get cautious.\n\n"
+        "**📊 RS Line & Blue Dot**: is this stock beating the index? "
+        "Line trending up = yes. A recent Blue Dot = extra-strong signal.\n\n"
+        "**🎯 Near Pivot/Breakouts**: 'Near Pivot' = watch it; "
+        "'Recent Breakouts' = the actionable buy-zone list.\n\n"
+        "**🔍 Pattern Recognition**: looks for a cup-with-handle base. "
+        "A detection gives an exact pivot price — but it's a heuristic, "
+        "verify visually before acting on it."
+    )
 
 with st.expander("📊 Feature roadmap vs. MarketSurge (formerly MarketSmith)"):
 
