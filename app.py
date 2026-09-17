@@ -268,6 +268,60 @@ st.markdown(
         color: inherit !important;
     }}
 
+    /* FIX: st.dataframe() — the two main leaderboard/qualification
+       tables — never had any custom styling at all, so they were
+       relying entirely on Streamlit's own default table look,
+       visually inconsistent with every custom-themed panel around
+       them. Professional financial terminals (Bloomberg, MarketSmith)
+       treat data tables as a first-class surface: clear header
+       separation, subtle row hover, monospace numerals for column
+       alignment. */
+    [data-testid="stDataFrame"] {{
+        border: 1px solid {BORDER} !important;
+        border-radius: 12px !important;
+        overflow: hidden !important;
+    }}
+
+    [data-testid="stDataFrame"] [role="columnheader"] {{
+        background: {PANEL2} !important;
+        color: {TEXT} !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        font-size: 11px !important;
+        letter-spacing: 0.4px !important;
+    }}
+
+    [data-testid="stDataFrame"] [role="gridcell"] {{
+        font-variant-numeric: tabular-nums !important;
+        font-size: 13px !important;
+    }}
+
+    [data-testid="stDataFrame"] [role="row"]:hover [role="gridcell"] {{
+        background: {PANEL2} !important;
+    }}
+
+    /* Smooth, subtle transitions on interactive surfaces — a small
+       but real "does this feel professional or thrown together"
+       signal; snap-instant hover states read as unpolished. */
+    .stButton > button,
+    .metric-card,
+    [data-testid="stDataFrame"] [role="gridcell"] {{
+        transition: all 0.15s ease-in-out !important;
+    }}
+
+    .metric-card:hover {{
+        border-color: {ACCENT} !important;
+        box-shadow: 0 4px 22px rgba(0,0,0,0.14) !important;
+    }}
+
+    /* st.container(border=True) panels (the real fix for the chart
+       section's panel, replacing the broken div hack above) — default
+       Streamlit border color doesn't match our theme otherwise. */
+    [data-testid="stVerticalBlockBorderWrapper"] {{
+        border-color: {BORDER} !important;
+        border-radius: 16px !important;
+    }}
+
     /* 3D RUBIK CUBE */
 
     .cube-container {{
@@ -2189,8 +2243,6 @@ with hcol2:
         "for how this is trained."
     )
 
-cols = st.columns(6)
-
 
 def metric_card(
     container,
@@ -2217,47 +2269,53 @@ def metric_card(
     )
 
 
-metric_card(
-    cols[0],
-    "Master Score",
-    s["Master Score"],
-    "Composite strength"
-)
+# FIX: gave this section a real bordered panel to match every other
+# module — same st.container(border=True) fix as the chart section.
+with st.container(border=True):
 
-metric_card(
-    cols[1],
-    "EPS Rating",
-    s["EPS Rating"],
-    "Earnings growth proxy"
-)
+    cols = st.columns(6)
 
-metric_card(
-    cols[2],
-    "Price Strength",
-    s["Price Strength (RS)"],
-    "Relative momentum"
-)
+    metric_card(
+        cols[0],
+        "Master Score",
+        s["Master Score"],
+        "Composite strength"
+    )
 
-metric_card(
-    cols[3],
-    "Group Rank",
-    s["Group Rank"],
-    "Peer position"
-)
+    metric_card(
+        cols[1],
+        "EPS Rating",
+        s["EPS Rating"],
+        "Earnings growth proxy"
+    )
 
-metric_card(
-    cols[4],
-    "Acc / Dis",
-    s["Acc/Dis Grade"],
-    "Volume pressure"
-)
+    metric_card(
+        cols[2],
+        "Price Strength",
+        s["Price Strength (RS)"],
+        "Relative momentum"
+    )
 
-metric_card(
-    cols[5],
-    "ML Probability",
-    f"{s['raw_ml_prob']:.1f}%",
-    "5-session direction model"
-)
+    metric_card(
+        cols[3],
+        "Group Rank",
+        s["Group Rank"],
+        "Peer position"
+    )
+
+    metric_card(
+        cols[4],
+        "Acc / Dis",
+        s["Acc/Dis Grade"],
+        "Volume pressure"
+    )
+
+    metric_card(
+        cols[5],
+        "ML Probability",
+        f"{s['raw_ml_prob']:.1f}%",
+        "5-session direction model"
+    )
 
 
 # ============================================================
@@ -3073,45 +3131,46 @@ fig.update_yaxes(
 
 # ============================================================
 # CHART SECTION
+#
+# FIX: this used to open a raw <div class="section-box"> in one
+# st.markdown() call and close it in a later one, with the actual
+# chart inserted via a separate st.plotly_chart() call in between.
+# Streamlit renders each call as its own sibling block in the DOM,
+# not nested inside HTML opened by an earlier, unrelated call — so
+# that bordered panel was very likely never actually wrapping the
+# chart at all. st.container(border=True) is Streamlit's own native
+# way to get a real panel that actually contains its children.
 # ============================================================
 
-st.markdown(
-    '<div class="section-box">',
-    unsafe_allow_html=True
-)
+with st.container(border=True):
 
-ccol1, ccol2 = st.columns([10, 1])
-with ccol1:
-    st.markdown("### 📈 Price Structure & ML Continuation")
-with ccol2:
-    info_button(
-        "**Candles**: green = up day, red = down day. Solid candles = "
-        "actual history; the last few candles are the ML forecast.\n\n"
-        "**MA 20 / MA 50 lines**: price consistently above both = "
-        "healthier trend.\n\n"
-        "**Orange dotted line**: the pivot (breakout) level.\n\n"
-        "**Volume bars below**: confirm moves — a breakout on low "
-        "volume is weaker than one on high volume."
+    ccol1, ccol2 = st.columns([10, 1])
+    with ccol1:
+        st.markdown("### 📈 Price Structure & ML Continuation")
+    with ccol2:
+        info_button(
+            "**Candles**: green = up day, red = down day. Solid candles = "
+            "actual history; the last few candles are the ML forecast.\n\n"
+            "**MA 20 / MA 50 lines**: price consistently above both = "
+            "healthier trend.\n\n"
+            "**Orange dotted line**: the pivot (breakout) level.\n\n"
+            "**Volume bars below**: confirm moves — a breakout on low "
+            "volume is weaker than one on high volume."
+        )
+
+    st.caption(
+        "The highlighted candles after the latest market candle "
+        "represent the model's historical-pattern projection."
     )
 
-st.caption(
-    "The highlighted candles after the latest market candle "
-    "represent the model's historical-pattern projection."
-)
-
-st.plotly_chart(
-    fig,
-    use_container_width=True,
-    config={
-        "displayModeBar": True,
-        "displaylogo": False
-    }
-)
-
-st.markdown(
-    "</div>",
-    unsafe_allow_html=True
-)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "displayModeBar": True,
+            "displaylogo": False
+        }
+    )
 
 
 # ============================================================
@@ -3307,34 +3366,36 @@ metric_card(
 
 st.markdown("### 📋 Comparative Performance Matrix")
 
-st.caption(
-    "All loaded stocks, ranked by ML Probability. "
-    "Select a stock below or in the sidebar for its full detail view."
-)
+with st.container(border=True):
 
-if not df_ranking.empty:
-
-    st.dataframe(
-        df_ranking[
-            [
-                "Ticker",
-                "Price",
-                "Composite Rating",
-                "ML Probability",
-                "Master Score",
-                "EPS Rating",
-                "Price Strength (RS)",
-                "SMR Rating",
-                "Value Rank",
-                "Group Rank",
-                "Acc/Dis Grade",
-                "Pivot Delta",
-                "Status"
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True
+    st.caption(
+        "All loaded stocks, ranked by ML Probability. "
+        "Select a stock below or in the sidebar for its full detail view."
     )
+
+    if not df_ranking.empty:
+
+        st.dataframe(
+            df_ranking[
+                [
+                    "Ticker",
+                    "Price",
+                    "Composite Rating",
+                    "ML Probability",
+                    "Master Score",
+                    "EPS Rating",
+                    "Price Strength (RS)",
+                    "SMR Rating",
+                    "Value Rank",
+                    "Group Rank",
+                    "Acc/Dis Grade",
+                    "Pivot Delta",
+                    "Status"
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True
+        )
 
 
 # ============================================================
@@ -3356,87 +3417,89 @@ with qcol2:
         "above for what each rating actually measures."
     )
 
-if market_direction is not None:
+with st.container(border=True):
 
-    market_status_text = (
-        "🟢 Bullish — NIFTY 50 above its 50-day and 200-day average"
-        if market_direction["bullish"]
-        else "🔴 Unfavorable — NIFTY 50 below its 50-day and/or 200-day average"
+    if market_direction is not None:
+
+        market_status_text = (
+            "🟢 Bullish — NIFTY 50 above its 50-day and 200-day average"
+            if market_direction["bullish"]
+            else "🔴 Unfavorable — NIFTY 50 below its 50-day and/or 200-day average"
+        )
+
+        st.info(
+            f"**M — Market Direction:** {market_status_text}  "
+            f"(NIFTY 50: ₹{market_direction['price']:.2f} · "
+            f"50-day avg: ₹{market_direction['ma50']:.2f} · "
+            f"200-day avg: ₹{market_direction['ma200']:.2f})"
+        )
+
+    else:
+
+        st.warning(
+            "M — Market Direction: could not be determined "
+            "(NIFTY 50 data unavailable)."
+        )
+
+    st.caption(
+        f"Price floor: ₹{PRICE_FLOOR:.0f}. "
+        "**I** (Institutional sponsorship) is shown as N/A — that data "
+        "genuinely isn't available for NSE tickers from any free source. "
+        "**A** (Annual EPS CAGR) is computed from each ticker's own income "
+        "statement and shows N/A only for tickers with too little EPS "
+        "history on file. Each cell shows the actual measured number, "
+        "with the pass/fail verdict alongside it — not just a bare tick "
+        "or cross."
     )
 
-    st.info(
-        f"**M — Market Direction:** {market_status_text}  "
-        f"(NIFTY 50: ₹{market_direction['price']:.2f} · "
-        f"50-day avg: ₹{market_direction['ma50']:.2f} · "
-        f"200-day avg: ₹{market_direction['ma200']:.2f})"
-    )
+    qualification_rows = []
 
-else:
+    for ticker, rec in master_records.items():
 
-    st.warning(
-        "M — Market Direction: could not be determined "
-        "(NIFTY 50 data unavailable)."
-    )
+        checks, values, status, go_ahead = evaluate_qualification(
+            rec,
+            market_direction
+        )
 
-st.caption(
-    f"Price floor: ₹{PRICE_FLOOR:.0f}. "
-    "**I** (Institutional sponsorship) is shown as N/A — that data "
-    "genuinely isn't available for NSE tickers from any free source. "
-    "**A** (Annual EPS CAGR) is computed from each ticker's own income "
-    "statement and shows N/A only for tickers with too little EPS "
-    "history on file. Each cell shows the actual measured number, "
-    "with the pass/fail verdict alongside it — not just a bare tick "
-    "or cross."
-)
+        def cell(k):
+            v = checks[k]
+            val_text = values[k]
+            if v is None:
+                return val_text
+            mark = "✅" if v else "❌"
+            return f"{val_text} {mark}"
 
-qualification_rows = []
+        qualification_rows.append({
+            "Ticker": ticker,
+            **{k: cell(k) for k in checks.keys()},
+            "Status": status,
+            "Go Ahead": "✅" if go_ahead else "❌"
+        })
 
-for ticker, rec in master_records.items():
+    if qualification_rows:
 
-    checks, values, status, go_ahead = evaluate_qualification(
-        rec,
-        market_direction
-    )
+        qual_df = pd.DataFrame(qualification_rows)
 
-    def cell(k):
-        v = checks[k]
-        val_text = values[k]
-        if v is None:
-            return val_text
-        mark = "✅" if v else "❌"
-        return f"{val_text} {mark}"
+        status_order = {
+            "Qualified": 0,
+            "Watchlist": 1,
+            "Insufficient data": 2,
+            "Below price floor": 3
+        }
 
-    qualification_rows.append({
-        "Ticker": ticker,
-        **{k: cell(k) for k in checks.keys()},
-        "Status": status,
-        "Go Ahead": "✅" if go_ahead else "❌"
-    })
+        qual_df["_sort"] = qual_df["Status"].map(status_order)
 
-if qualification_rows:
+        qual_df = (
+            qual_df
+            .sort_values("_sort")
+            .drop(columns="_sort")
+        )
 
-    qual_df = pd.DataFrame(qualification_rows)
-
-    status_order = {
-        "Qualified": 0,
-        "Watchlist": 1,
-        "Insufficient data": 2,
-        "Below price floor": 3
-    }
-
-    qual_df["_sort"] = qual_df["Status"].map(status_order)
-
-    qual_df = (
-        qual_df
-        .sort_values("_sort")
-        .drop(columns="_sort")
-    )
-
-    st.dataframe(
-        qual_df,
-        use_container_width=True,
-        hide_index=True
-    )
+        st.dataframe(
+            qual_df,
+            use_container_width=True,
+            hide_index=True
+        )
 
 
 # ============================================================
@@ -3462,266 +3525,268 @@ with acol2:
         "verify visually before acting on it."
     )
 
-with st.expander("📊 Feature roadmap vs. MarketSurge (formerly MarketSmith)"):
+with st.container(border=True):
 
-    st.markdown(
-        "| MarketSurge feature | What it does | Us | Status |\n"
-        "|---|---|---|---|\n"
-        "| Big Picture / Market School | Follow-Through Day, Power Trend, Distribution Days | ✅ | Built below |\n"
-        "| RS Line + Blue Dot | Stock-vs-index ratio, new-high marker | ✅ | Built below |\n"
-        "| Near Pivot / Recent Breakouts lists | Pre-filtered setup lists | ✅ | Built below |\n"
-        "| Pattern Recognition (cup-w-handle) | Auto-detects base patterns | ✅ | Built below (heuristic) |\n"
-        "| Sales+Margins+ROE (SMR) Rating | Fundamental quality grade A-E | ✅ | In Qualification Screen |\n"
-        "| Composite Rating | Blends EPS+RS+SMR+Acc/Dis | ✅ | In leaderboard table |\n"
-        "| Sponsorship Rating (fund ownership) | 3-yr institutional trend | ❌ | No free India data source |\n"
-        "| Industry Group RS | Stock's sector ranked vs all sectors | ❌ | Needs full NSE sector universe |\n"
-    )
+    with st.expander("📊 Feature roadmap vs. MarketSurge (formerly MarketSmith)"):
 
-if "advanced_mode" not in st.session_state:
-    st.session_state.advanced_mode = "big_picture"
+        st.markdown(
+            "| MarketSurge feature | What it does | Us | Status |\n"
+            "|---|---|---|---|\n"
+            "| Big Picture / Market School | Follow-Through Day, Power Trend, Distribution Days | ✅ | Built below |\n"
+            "| RS Line + Blue Dot | Stock-vs-index ratio, new-high marker | ✅ | Built below |\n"
+            "| Near Pivot / Recent Breakouts lists | Pre-filtered setup lists | ✅ | Built below |\n"
+            "| Pattern Recognition (cup-w-handle) | Auto-detects base patterns | ✅ | Built below (heuristic) |\n"
+            "| Sales+Margins+ROE (SMR) Rating | Fundamental quality grade A-E | ✅ | In Qualification Screen |\n"
+            "| Composite Rating | Blends EPS+RS+SMR+Acc/Dis | ✅ | In leaderboard table |\n"
+            "| Sponsorship Rating (fund ownership) | 3-yr institutional trend | ❌ | No free India data source |\n"
+            "| Industry Group RS | Stock's sector ranked vs all sectors | ❌ | Needs full NSE sector universe |\n"
+        )
 
-mode_col1, mode_col2, mode_col3, mode_col4 = st.columns(4)
-
-with mode_col1:
-    if st.button("📈 Big Picture", use_container_width=True):
+    if "advanced_mode" not in st.session_state:
         st.session_state.advanced_mode = "big_picture"
 
-with mode_col2:
-    if st.button("📊 RS Line & Blue Dot", use_container_width=True):
-        st.session_state.advanced_mode = "rs_line"
+    mode_col1, mode_col2, mode_col3, mode_col4 = st.columns(4)
 
-with mode_col3:
-    if st.button("🎯 Near Pivot / Breakouts", use_container_width=True):
-        st.session_state.advanced_mode = "pivot_list"
+    with mode_col1:
+        if st.button("📈 Big Picture", use_container_width=True):
+            st.session_state.advanced_mode = "big_picture"
 
-with mode_col4:
-    if st.button("🔍 Pattern Recognition", use_container_width=True):
-        st.session_state.advanced_mode = "pattern"
+    with mode_col2:
+        if st.button("📊 RS Line & Blue Dot", use_container_width=True):
+            st.session_state.advanced_mode = "rs_line"
 
-mode = st.session_state.advanced_mode
+    with mode_col3:
+        if st.button("🎯 Near Pivot / Breakouts", use_container_width=True):
+            st.session_state.advanced_mode = "pivot_list"
+
+    with mode_col4:
+        if st.button("🔍 Pattern Recognition", use_container_width=True):
+            st.session_state.advanced_mode = "pattern"
+
+    mode = st.session_state.advanced_mode
 
 
-# ---- Mode 1: Big Picture ----
-if mode == "big_picture":
+    # ---- Mode 1: Big Picture ----
+    if mode == "big_picture":
 
-    st.markdown("#### 📈 Big Picture — Market School (NIFTY 50)")
+        st.markdown("#### 📈 Big Picture — Market School (NIFTY 50)")
 
-    st.caption(
-        "IBD's published rally/Follow-Through Day rules, applied to "
-        "NIFTY 50. The 1.25% FTD gain threshold is a disclosed "
-        "simplification — IBD doesn't publish one uniform figure "
-        "for every index."
-    )
+        st.caption(
+            "IBD's published rally/Follow-Through Day rules, applied to "
+            "NIFTY 50. The 1.25% FTD gain threshold is a disclosed "
+            "simplification — IBD doesn't publish one uniform figure "
+            "for every index."
+        )
 
-    if market_direction is not None and "hist" in market_direction:
+        if market_direction is not None and "hist" in market_direction:
 
-        bp = analyze_big_picture(market_direction["hist"])
+            bp = analyze_big_picture(market_direction["hist"])
 
-        if bp is not None:
+            if bp is not None:
 
-            bpc1, bpc2, bpc3, bpc4 = st.columns(4)
+                bpc1, bpc2, bpc3, bpc4 = st.columns(4)
 
-            metric_card(
-                bpc1,
-                "Market State",
-                bp["state"],
-                "Current Big Picture read"
-            )
+                metric_card(
+                    bpc1,
+                    "Market State",
+                    bp["state"],
+                    "Current Big Picture read"
+                )
 
-            metric_card(
-                bpc2,
-                "Distribution Days",
-                str(bp["distribution_days"]),
-                "Trailing 25 sessions (5+ = caution)"
-            )
+                metric_card(
+                    bpc2,
+                    "Distribution Days",
+                    str(bp["distribution_days"]),
+                    "Trailing 25 sessions (5+ = caution)"
+                )
 
-            metric_card(
-                bpc3,
-                "Follow-Through Day",
-                (
-                    bp["ftd_date"].strftime("%Y-%m-%d")
-                    if bp["ftd_date"] is not None
-                    else "None recent"
-                ),
-                f"+{bp['ftd_gain']:.2f}%" if bp["ftd_gain"] else "—"
-            )
+                metric_card(
+                    bpc3,
+                    "Follow-Through Day",
+                    (
+                        bp["ftd_date"].strftime("%Y-%m-%d")
+                        if bp["ftd_date"] is not None
+                        else "None recent"
+                    ),
+                    f"+{bp['ftd_gain']:.2f}%" if bp["ftd_gain"] else "—"
+                )
 
-            metric_card(
-                bpc4,
-                "52w Range Position",
-                f"{bp['price_percentile_52w']:.0f}%",
-                "Top 25% needed for Power Trend"
-            )
+                metric_card(
+                    bpc4,
+                    "52w Range Position",
+                    f"{bp['price_percentile_52w']:.0f}%",
+                    "Top 25% needed for Power Trend"
+                )
+
+            else:
+                st.warning("Not enough index history to run Big Picture analysis.")
 
         else:
-            st.warning("Not enough index history to run Big Picture analysis.")
-
-    else:
-        st.warning("NIFTY 50 data unavailable — Big Picture can't be computed.")
+            st.warning("NIFTY 50 data unavailable — Big Picture can't be computed.")
 
 
-# ---- Mode 2: RS Line & Blue Dot ----
-elif mode == "rs_line":
+    # ---- Mode 2: RS Line & Blue Dot ----
+    elif mode == "rs_line":
 
-    st.markdown(f"#### 📊 RS Line & Blue Dot — {selected_stock}")
+        st.markdown(f"#### 📊 RS Line & Blue Dot — {selected_stock}")
 
-    st.caption(
-        "The RS Line (stock price ÷ index price) is a different signal "
-        "from the RS Rating number — a Blue Dot marks a day where this "
-        "ratio hits a new high while price is also near its own high."
-    )
+        st.caption(
+            "The RS Line (stock price ÷ index price) is a different signal "
+            "from the RS Rating number — a Blue Dot marks a day where this "
+            "ratio hits a new high while price is also near its own high."
+        )
 
-    if market_direction is not None and "hist" in market_direction:
+        if market_direction is not None and "hist" in market_direction:
 
-        rsl = compute_rs_line(df_chart, market_direction["hist"])
+            rsl = compute_rs_line(df_chart, market_direction["hist"])
 
-        if rsl is not None:
+            if rsl is not None:
 
-            rs_fig = go.Figure()
-
-            rs_fig.add_trace(go.Scatter(
-                x=rsl["dates"],
-                y=rsl["rs_line"],
-                mode="lines",
-                name="RS Line",
-                line=dict(color="#8b5cf6", width=2)
-            ))
-
-            if rsl["blue_dot_dates"]:
+                rs_fig = go.Figure()
 
                 rs_fig.add_trace(go.Scatter(
-                    x=rsl["blue_dot_dates"],
-                    y=[
-                        rsl["rs_line"].loc[d]
-                        for d in rsl["blue_dot_dates"]
-                    ],
-                    mode="markers",
-                    name="Blue Dot",
-                    marker=dict(color="#00d4ff", size=8, symbol="circle")
+                    x=rsl["dates"],
+                    y=rsl["rs_line"],
+                    mode="lines",
+                    name="RS Line",
+                    line=dict(color="#8b5cf6", width=2)
                 ))
 
-            rs_fig.update_layout(
-                height=400,
-                template="plotly_dark" if theme == "Dark" else "plotly_white",
-                margin=dict(l=10, r=10, t=30, b=10)
-            )
+                if rsl["blue_dot_dates"]:
 
-            st.plotly_chart(rs_fig, use_container_width=True)
+                    rs_fig.add_trace(go.Scatter(
+                        x=rsl["blue_dot_dates"],
+                        y=[
+                            rsl["rs_line"].loc[d]
+                            for d in rsl["blue_dot_dates"]
+                        ],
+                        mode="markers",
+                        name="Blue Dot",
+                        marker=dict(color="#00d4ff", size=8, symbol="circle")
+                    ))
 
-            st.info(
-                "🔵 Recent Blue Dot (last 10 sessions)"
-                if rsl["recent_blue_dot"]
-                else "No recent Blue Dot in the last 10 sessions"
-            )
+                rs_fig.update_layout(
+                    height=400,
+                    template="plotly_dark" if theme == "Dark" else "plotly_white",
+                    margin=dict(l=10, r=10, t=30, b=10)
+                )
+
+                st.plotly_chart(rs_fig, use_container_width=True)
+
+                st.info(
+                    "🔵 Recent Blue Dot (last 10 sessions)"
+                    if rsl["recent_blue_dot"]
+                    else "No recent Blue Dot in the last 10 sessions"
+                )
+
+            else:
+                st.warning("Not enough overlapping history to compute the RS Line.")
 
         else:
-            st.warning("Not enough overlapping history to compute the RS Line.")
-
-    else:
-        st.warning("NIFTY 50 data unavailable — RS Line can't be computed.")
+            st.warning("NIFTY 50 data unavailable — RS Line can't be computed.")
 
 
-# ---- Mode 3: Near Pivot / Recent Breakouts ----
-elif mode == "pivot_list":
+    # ---- Mode 3: Near Pivot / Recent Breakouts ----
+    elif mode == "pivot_list":
 
-    st.markdown("#### 🎯 Near Pivot / Recent Breakouts")
+        st.markdown("#### 🎯 Near Pivot / Recent Breakouts")
 
-    st.caption(
-        "Near Pivot: within 5% below the pivot, not yet broken out. "
-        "Recent Breakouts: crossed above pivot within the last 10 sessions."
-    )
+        st.caption(
+            "Near Pivot: within 5% below the pivot, not yet broken out. "
+            "Recent Breakouts: crossed above pivot within the last 10 sessions."
+        )
 
-    near_pivot_rows = []
-    breakout_rows = []
+        near_pivot_rows = []
+        breakout_rows = []
 
-    for ticker, rec in master_records.items():
+        for ticker, rec in master_records.items():
 
-        delta = rec["raw_pivot_delta"]
+            delta = rec["raw_pivot_delta"]
 
-        if -5.0 <= delta < 0:
+            if -5.0 <= delta < 0:
 
-            near_pivot_rows.append({
-                "Ticker": ticker,
-                "Price": rec["Price"],
-                "Pivot Delta": rec["Pivot Delta"]
-            })
-
-        elif delta >= 0:
-
-            hist_r = rec["raw_hist"]
-            pivot_r = rec["raw_pivot"]
-            closes_r = hist_r["Close"].tail(11)
-
-            crossed_recently = False
-
-            for i in range(1, len(closes_r)):
-                if (
-                    closes_r.iloc[i - 1] < pivot_r
-                    and closes_r.iloc[i] >= pivot_r
-                ):
-                    crossed_recently = True
-                    break
-
-            if crossed_recently:
-
-                breakout_rows.append({
+                near_pivot_rows.append({
                     "Ticker": ticker,
                     "Price": rec["Price"],
                     "Pivot Delta": rec["Pivot Delta"]
                 })
 
-    pcol1, pcol2 = st.columns(2)
+            elif delta >= 0:
 
-    with pcol1:
-        st.markdown("**Near Pivot**")
-        if near_pivot_rows:
-            st.dataframe(
-                pd.DataFrame(near_pivot_rows),
-                use_container_width=True,
-                hide_index=True
-            )
+                hist_r = rec["raw_hist"]
+                pivot_r = rec["raw_pivot"]
+                closes_r = hist_r["Close"].tail(11)
+
+                crossed_recently = False
+
+                for i in range(1, len(closes_r)):
+                    if (
+                        closes_r.iloc[i - 1] < pivot_r
+                        and closes_r.iloc[i] >= pivot_r
+                    ):
+                        crossed_recently = True
+                        break
+
+                if crossed_recently:
+
+                    breakout_rows.append({
+                        "Ticker": ticker,
+                        "Price": rec["Price"],
+                        "Pivot Delta": rec["Pivot Delta"]
+                    })
+
+        pcol1, pcol2 = st.columns(2)
+
+        with pcol1:
+            st.markdown("**Near Pivot**")
+            if near_pivot_rows:
+                st.dataframe(
+                    pd.DataFrame(near_pivot_rows),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.caption("No stocks currently within 5% below their pivot.")
+
+        with pcol2:
+            st.markdown("**Recent Breakouts**")
+            if breakout_rows:
+                st.dataframe(
+                    pd.DataFrame(breakout_rows),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.caption("No stocks broke out above pivot in the last 10 sessions.")
+
+
+    # ---- Mode 4: Pattern Recognition ----
+    elif mode == "pattern":
+
+        st.markdown(f"#### 🔍 Pattern Recognition — {selected_stock}")
+
+        st.caption(
+            "A simplified, disclosed heuristic for the classic cup-with-handle "
+            "base — not a claimed replica of MarketSurge's AI detector. Will "
+            "have false positives/negatives on real data."
+        )
+
+        pattern_result = detect_cup_and_handle(df_chart)
+
+        if pattern_result["detected"]:
+
+            st.success("✅ Valid cup-with-handle pattern detected")
+
+            pc1, pc2, pc3, pc4 = st.columns(4)
+
+            metric_card(pc1, "Left Rim", f"₹{pattern_result['left_rim_price']:.2f}", "Cup start")
+            metric_card(pc2, "Cup Bottom", f"₹{pattern_result['cup_bottom_price']:.2f}", f"{pattern_result['cup_depth_pct']:.1f}% deep")
+            metric_card(pc3, "Right Rim", f"₹{pattern_result['right_rim_price']:.2f}", "Cup recovery")
+            metric_card(pc4, "Pivot (buy point)", f"₹{pattern_result['pivot_price']:.2f}", f"Handle {pattern_result['handle_depth_pct']:.1f}% deep")
+
         else:
-            st.caption("No stocks currently within 5% below their pivot.")
 
-    with pcol2:
-        st.markdown("**Recent Breakouts**")
-        if breakout_rows:
-            st.dataframe(
-                pd.DataFrame(breakout_rows),
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.caption("No stocks broke out above pivot in the last 10 sessions.")
-
-
-# ---- Mode 4: Pattern Recognition ----
-elif mode == "pattern":
-
-    st.markdown(f"#### 🔍 Pattern Recognition — {selected_stock}")
-
-    st.caption(
-        "A simplified, disclosed heuristic for the classic cup-with-handle "
-        "base — not a claimed replica of MarketSurge's AI detector. Will "
-        "have false positives/negatives on real data."
-    )
-
-    pattern_result = detect_cup_and_handle(df_chart)
-
-    if pattern_result["detected"]:
-
-        st.success("✅ Valid cup-with-handle pattern detected")
-
-        pc1, pc2, pc3, pc4 = st.columns(4)
-
-        metric_card(pc1, "Left Rim", f"₹{pattern_result['left_rim_price']:.2f}", "Cup start")
-        metric_card(pc2, "Cup Bottom", f"₹{pattern_result['cup_bottom_price']:.2f}", f"{pattern_result['cup_depth_pct']:.1f}% deep")
-        metric_card(pc3, "Right Rim", f"₹{pattern_result['right_rim_price']:.2f}", "Cup recovery")
-        metric_card(pc4, "Pivot (buy point)", f"₹{pattern_result['pivot_price']:.2f}", f"Handle {pattern_result['handle_depth_pct']:.1f}% deep")
-
-    else:
-
-        st.info(f"No valid cup-with-handle pattern currently: {pattern_result.get('reason', 'unknown')}")
+            st.info(f"No valid cup-with-handle pattern currently: {pattern_result.get('reason', 'unknown')}")
 
 
 # ============================================================
@@ -3730,304 +3795,306 @@ elif mode == "pattern":
 
 st.markdown("---")
 
-chat_header_col, chat_clear_col = st.columns([5, 1])
+with st.container(border=True):
 
-with chat_header_col:
+    chat_header_col, chat_clear_col = st.columns([5, 1])
 
-    st.markdown("### 💬 Stock Intelligence Chat")
+    with chat_header_col:
 
-    st.caption(
-        f"Ask questions about **{selected_stock}**. "
-        "The answers below are generated from the currently loaded market data and technical calculations."
-    )
+        st.markdown("### 💬 Stock Intelligence Chat")
 
-with chat_clear_col:
+        st.caption(
+            f"Ask questions about **{selected_stock}**. "
+            "The answers below are generated from the currently loaded market data and technical calculations."
+        )
 
-    st.markdown("")
-    st.markdown("")
+    with chat_clear_col:
 
-    if st.button(
-        "🗑️ Clear chat",
-        use_container_width=True
-    ):
+        st.markdown("")
+        st.markdown("")
+
+        if st.button(
+            "🗑️ Clear chat",
+            use_container_width=True
+        ):
+
+            st.session_state.chat_history = []
+            st.rerun()
+
+
+    if "chat_history" not in st.session_state:
 
         st.session_state.chat_history = []
-        st.rerun()
+
+    # FIX: the conversation used to persist across stock switches, so
+    # asking a fresh question after changing the sidebar selection could
+    # show old answers mixed in about a completely different ticker.
+    # Tracking which stock the chat is "about" and auto-resetting when
+    # it changes keeps every conversation scoped to one stock.
+    if st.session_state.get("chat_stock") != selected_stock:
+
+        st.session_state.chat_history = []
+        st.session_state.chat_stock = selected_stock
 
 
-if "chat_history" not in st.session_state:
-
-    st.session_state.chat_history = []
-
-# FIX: the conversation used to persist across stock switches, so
-# asking a fresh question after changing the sidebar selection could
-# show old answers mixed in about a completely different ticker.
-# Tracking which stock the chat is "about" and auto-resetting when
-# it changes keeps every conversation scoped to one stock.
-if st.session_state.get("chat_stock") != selected_stock:
-
-    st.session_state.chat_history = []
-    st.session_state.chat_stock = selected_stock
-
-
-question = st.chat_input(
-    f"Ask about {selected_stock} — e.g. RSI, trend, volume, pivot, forecast..."
-)
-
-
-def answer_stock_question(
-    question,
-    symbol,
-    record,
-    data
-):
-
-    q = question.lower()
-
-    price = float(
-        data["Close"].iloc[-1]
-    )
-
-    rsi = float(
-        data["RSI"].iloc[-1]
-    )
-
-    macd = float(
-        data["MACD"].iloc[-1]
-    )
-
-    signal = float(
-        data["MACD_Signal"].iloc[-1]
-    )
-
-    ma20 = float(
-        data["MA20"].iloc[-1]
-    )
-
-    ma50 = float(
-        data["MA50"].iloc[-1]
-    )
-
-    volume = float(
-        data["Volume"].iloc[-1]
-    )
-
-    avg_volume = float(
-        data["Volume"]
-        .rolling(20)
-        .mean()
-        .iloc[-1]
-    )
-
-    vol_ratio = (
-        volume / avg_volume
-        if avg_volume > 0
-        else 1
-    )
-
-    pivot = float(
-        record["raw_pivot"]
-    )
-
-    pivot_delta = float(
-        record["raw_pivot_delta"]
-    )
-
-    master = int(
-        record["raw_master_score"]
-    )
-
-    eps = int(
-        record["raw_eps"]
-    )
-
-    rs = int(
-        record["raw_rs"]
-    )
-
-    ml = float(
-        record["raw_ml_prob"]
-    )
-
-    if (
-        "rsi" in q
-        or "momentum" in q
-    ):
-
-        if rsi >= 70:
-            interpretation = "RSI is in an elevated zone."
-
-        elif rsi <= 30:
-            interpretation = "RSI is in a depressed zone."
-
-        else:
-            interpretation = "RSI is between the conventional 30–70 boundaries."
-
-        return (
-            f"### RSI — {symbol}\n\n"
-            f"**RSI:** {rsi:.1f}\n\n"
-            f"{interpretation}\n\n"
-            f"**Price:** ₹{price:.2f}"
-        )
-
-    if (
-        "volume" in q
-        or "demand" in q
-    ):
-
-        volume_state = (
-            "above"
-            if vol_ratio > 1
-            else "below"
-        )
-
-        return (
-            f"### Volume — {symbol}\n\n"
-            f"**Latest Volume:** {volume:,.0f}\n\n"
-            f"**20-session average:** {avg_volume:,.0f}\n\n"
-            f"**Volume Ratio:** {vol_ratio:.2f}x\n\n"
-            f"Latest volume is **{volume_state}** "
-            f"the 20-session average."
-        )
-
-    if (
-        "pivot" in q
-        or "breakout" in q
-    ):
-
-        return (
-            f"### Pivot Structure — {symbol}\n\n"
-            f"**Current Price:** ₹{price:.2f}\n\n"
-            f"**Pivot:** ₹{pivot:.2f}\n\n"
-            f"**Distance from Pivot:** {pivot_delta:+.2f}%\n\n"
-            f"The application's current setup logic "
-            f"considers 0% to +6% from the pivot as its setup zone."
-        )
-
-    if (
-        "forecast" in q
-        or "prediction" in q
-        or "future" in q
-    ):
-
-        return (
-            f"### ML Forecast — {symbol}\n\n"
-            f"**Current:** ₹{price:.2f}\n\n"
-            f"**5-session projected endpoint:** "
-            f"₹{projected_price:.2f}\n\n"
-            f"**Model movement:** "
-            f"{forecast_change:+.2f}%\n\n"
-            f"**Classifier probability of higher price:** "
-            f"{ml:.1f}%\n\n"
-            f"These are model estimates based on historical patterns, "
-            f"not guaranteed future prices."
-        )
-
-    if (
-        "score" in q
-        or "canslim" in q
-        or "rating" in q
-    ):
-
-        return (
-            f"### CANSLIM Metrics — {symbol}\n\n"
-            f"| Metric | Value |\n"
-            f"|---|---:|\n"
-            f"| Master Score | {master}/99 |\n"
-            f"| EPS Rating | {eps}/99 |\n"
-            f"| Price Strength | {rs}/99 |\n"
-            f"| Acc/Dis Grade | {record['Acc/Dis Grade']} |\n"
-            f"| Group Rank | {record['Group Rank']} |\n"
-            f"| ML Probability | {ml:.1f}% |"
-        )
-
-    if (
-        "trend" in q
-        or "technical" in q
-        or "analysis" in q
-    ):
-
-        trend_points = []
-
-        trend_points.append(
-            "above MA20"
-            if price > ma20
-            else "below MA20"
-        )
-
-        trend_points.append(
-            "above MA50"
-            if price > ma50
-            else "below MA50"
-        )
-
-        trend_points.append(
-            "MACD above signal"
-            if macd > signal
-            else "MACD below signal"
-        )
-
-        return (
-            f"### Technical Snapshot — {symbol}\n\n"
-            f"**Price:** ₹{price:.2f}\n\n"
-            f"**RSI:** {rsi:.1f}\n\n"
-            f"**MACD:** {macd:.2f}\n\n"
-            f"**MA20:** ₹{ma20:.2f}\n\n"
-            f"**MA50:** ₹{ma50:.2f}\n\n"
-            f"**Volume:** {vol_ratio:.2f}x 20-session average\n\n"
-            f"**Structure:** {', '.join(trend_points)}."
-        )
-
-    return (
-        f"### {symbol} — Current Snapshot\n\n"
-        f"**Price:** ₹{price:.2f}\n\n"
-        f"**Master Score:** {master}/99\n\n"
-        f"**RS:** {rs}/99\n\n"
-        f"**EPS:** {eps}/99\n\n"
-        f"**RSI:** {rsi:.1f}\n\n"
-        f"**ML Probability:** {ml:.1f}%\n\n"
-        f"**Pivot:** ₹{pivot:.2f}\n\n"
-        f"**5-session model move:** {forecast_change:+.2f}%\n\n"
-        f"Try asking: **'What is the RSI?'**, "
-        f"**'How is volume?'**, "
-        f"**'What is the forecast?'**, "
-        f"or **'Show technical analysis'**."
+    question = st.chat_input(
+        f"Ask about {selected_stock} — e.g. RSI, trend, volume, pivot, forecast..."
     )
 
 
-if question:
-
-    st.session_state.chat_history.append(
-        {
-            "role": "user",
-            "content": question
-        }
-    )
-
-    response = answer_stock_question(
+    def answer_stock_question(
         question,
-        selected_stock,
-        s,
-        df_chart
-    )
-
-    st.session_state.chat_history.append(
-        {
-            "role": "assistant",
-            "content": response
-        }
-    )
-
-
-for message in st.session_state.chat_history:
-
-    with st.chat_message(
-        message["role"]
+        symbol,
+        record,
+        data
     ):
 
-        st.markdown(
-            message["content"]
+        q = question.lower()
+
+        price = float(
+            data["Close"].iloc[-1]
         )
+
+        rsi = float(
+            data["RSI"].iloc[-1]
+        )
+
+        macd = float(
+            data["MACD"].iloc[-1]
+        )
+
+        signal = float(
+            data["MACD_Signal"].iloc[-1]
+        )
+
+        ma20 = float(
+            data["MA20"].iloc[-1]
+        )
+
+        ma50 = float(
+            data["MA50"].iloc[-1]
+        )
+
+        volume = float(
+            data["Volume"].iloc[-1]
+        )
+
+        avg_volume = float(
+            data["Volume"]
+            .rolling(20)
+            .mean()
+            .iloc[-1]
+        )
+
+        vol_ratio = (
+            volume / avg_volume
+            if avg_volume > 0
+            else 1
+        )
+
+        pivot = float(
+            record["raw_pivot"]
+        )
+
+        pivot_delta = float(
+            record["raw_pivot_delta"]
+        )
+
+        master = int(
+            record["raw_master_score"]
+        )
+
+        eps = int(
+            record["raw_eps"]
+        )
+
+        rs = int(
+            record["raw_rs"]
+        )
+
+        ml = float(
+            record["raw_ml_prob"]
+        )
+
+        if (
+            "rsi" in q
+            or "momentum" in q
+        ):
+
+            if rsi >= 70:
+                interpretation = "RSI is in an elevated zone."
+
+            elif rsi <= 30:
+                interpretation = "RSI is in a depressed zone."
+
+            else:
+                interpretation = "RSI is between the conventional 30–70 boundaries."
+
+            return (
+                f"### RSI — {symbol}\n\n"
+                f"**RSI:** {rsi:.1f}\n\n"
+                f"{interpretation}\n\n"
+                f"**Price:** ₹{price:.2f}"
+            )
+
+        if (
+            "volume" in q
+            or "demand" in q
+        ):
+
+            volume_state = (
+                "above"
+                if vol_ratio > 1
+                else "below"
+            )
+
+            return (
+                f"### Volume — {symbol}\n\n"
+                f"**Latest Volume:** {volume:,.0f}\n\n"
+                f"**20-session average:** {avg_volume:,.0f}\n\n"
+                f"**Volume Ratio:** {vol_ratio:.2f}x\n\n"
+                f"Latest volume is **{volume_state}** "
+                f"the 20-session average."
+            )
+
+        if (
+            "pivot" in q
+            or "breakout" in q
+        ):
+
+            return (
+                f"### Pivot Structure — {symbol}\n\n"
+                f"**Current Price:** ₹{price:.2f}\n\n"
+                f"**Pivot:** ₹{pivot:.2f}\n\n"
+                f"**Distance from Pivot:** {pivot_delta:+.2f}%\n\n"
+                f"The application's current setup logic "
+                f"considers 0% to +6% from the pivot as its setup zone."
+            )
+
+        if (
+            "forecast" in q
+            or "prediction" in q
+            or "future" in q
+        ):
+
+            return (
+                f"### ML Forecast — {symbol}\n\n"
+                f"**Current:** ₹{price:.2f}\n\n"
+                f"**5-session projected endpoint:** "
+                f"₹{projected_price:.2f}\n\n"
+                f"**Model movement:** "
+                f"{forecast_change:+.2f}%\n\n"
+                f"**Classifier probability of higher price:** "
+                f"{ml:.1f}%\n\n"
+                f"These are model estimates based on historical patterns, "
+                f"not guaranteed future prices."
+            )
+
+        if (
+            "score" in q
+            or "canslim" in q
+            or "rating" in q
+        ):
+
+            return (
+                f"### CANSLIM Metrics — {symbol}\n\n"
+                f"| Metric | Value |\n"
+                f"|---|---:|\n"
+                f"| Master Score | {master}/99 |\n"
+                f"| EPS Rating | {eps}/99 |\n"
+                f"| Price Strength | {rs}/99 |\n"
+                f"| Acc/Dis Grade | {record['Acc/Dis Grade']} |\n"
+                f"| Group Rank | {record['Group Rank']} |\n"
+                f"| ML Probability | {ml:.1f}% |"
+            )
+
+        if (
+            "trend" in q
+            or "technical" in q
+            or "analysis" in q
+        ):
+
+            trend_points = []
+
+            trend_points.append(
+                "above MA20"
+                if price > ma20
+                else "below MA20"
+            )
+
+            trend_points.append(
+                "above MA50"
+                if price > ma50
+                else "below MA50"
+            )
+
+            trend_points.append(
+                "MACD above signal"
+                if macd > signal
+                else "MACD below signal"
+            )
+
+            return (
+                f"### Technical Snapshot — {symbol}\n\n"
+                f"**Price:** ₹{price:.2f}\n\n"
+                f"**RSI:** {rsi:.1f}\n\n"
+                f"**MACD:** {macd:.2f}\n\n"
+                f"**MA20:** ₹{ma20:.2f}\n\n"
+                f"**MA50:** ₹{ma50:.2f}\n\n"
+                f"**Volume:** {vol_ratio:.2f}x 20-session average\n\n"
+                f"**Structure:** {', '.join(trend_points)}."
+            )
+
+        return (
+            f"### {symbol} — Current Snapshot\n\n"
+            f"**Price:** ₹{price:.2f}\n\n"
+            f"**Master Score:** {master}/99\n\n"
+            f"**RS:** {rs}/99\n\n"
+            f"**EPS:** {eps}/99\n\n"
+            f"**RSI:** {rsi:.1f}\n\n"
+            f"**ML Probability:** {ml:.1f}%\n\n"
+            f"**Pivot:** ₹{pivot:.2f}\n\n"
+            f"**5-session model move:** {forecast_change:+.2f}%\n\n"
+            f"Try asking: **'What is the RSI?'**, "
+            f"**'How is volume?'**, "
+            f"**'What is the forecast?'**, "
+            f"or **'Show technical analysis'**."
+        )
+
+
+    if question:
+
+        st.session_state.chat_history.append(
+            {
+                "role": "user",
+                "content": question
+            }
+        )
+
+        response = answer_stock_question(
+            question,
+            selected_stock,
+            s,
+            df_chart
+        )
+
+        st.session_state.chat_history.append(
+            {
+                "role": "assistant",
+                "content": response
+            }
+        )
+
+
+    for message in st.session_state.chat_history:
+
+        with st.chat_message(
+            message["role"]
+        ):
+
+            st.markdown(
+                message["content"]
+            )
 
 
 # ============================================================
@@ -4038,28 +4105,30 @@ st.markdown("---")
 
 st.markdown("### 🎯 Price Structure Reference")
 
-risk1, risk2, risk3 = st.columns(3)
+with st.container(border=True):
 
-metric_card(
-    risk1,
-    "Current Price",
-    f"₹{current_price:.2f}",
-    "Latest available close"
-)
+    risk1, risk2, risk3 = st.columns(3)
 
-metric_card(
-    risk2,
-    "Pivot",
-    f"₹{s['raw_pivot']:.2f}",
-    f"{s['raw_pivot_delta']:+.1f}% from pivot"
-)
+    metric_card(
+        risk1,
+        "Current Price",
+        f"₹{current_price:.2f}",
+        "Latest available close"
+    )
 
-metric_card(
-    risk3,
-    "52W High",
-    f"₹{df_chart['High'].max():.2f}",
-    f"{s['pct_off_high']:.1f}% from high"
-)
+    metric_card(
+        risk2,
+        "Pivot",
+        f"₹{s['raw_pivot']:.2f}",
+        f"{s['raw_pivot_delta']:+.1f}% from pivot"
+    )
+
+    metric_card(
+        risk3,
+        "52W High",
+        f"₹{df_chart['High'].max():.2f}",
+        f"{s['pct_off_high']:.1f}% from high"
+    )
 
 
 st.caption(
