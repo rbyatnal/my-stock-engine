@@ -1151,7 +1151,7 @@ def check_market_direction():
 
     try:
         index = yf.Ticker("^NSEI")
-        index_hist = index.history(period="1y")
+        index_hist = index.history(period="2y")
 
         if index_hist.empty or len(index_hist) < 200:
             return None
@@ -1167,11 +1167,335 @@ def check_market_direction():
             "bullish": bullish,
             "price": index_price,
             "ma50": ma50,
-            "ma200": ma200
+            "ma200": ma200,
+            "hist": index_hist
         }
 
     except Exception:
         return None
+
+
+# ============================================================
+# BIG PICTURE / FOLLOW-THROUGH DAY SYSTEM
+#
+# IBD's own "Market School" rules (published methodology, not
+# proprietary): a correction ends when a Rally Attempt's Day 1 (an
+# up day off a low) is followed within days 4-10 by a Follow-Through
+# Day — a day up ~1.25%+ on higher volume than the prior day. A
+# "Power Trend" is a stronger confirmed state: 10 straight daily
+# lows above the 21-day EMA, the 21-EMA above the 50-day average for
+# 5+ sessions and itself rising, with price in the top quarter of
+# its 52-week range. Distribution Days (down 0.2%+ on higher volume)
+# are tallied over the trailing 25 sessions as an early-warning
+# count. IBD doesn't publish the exact gain-% threshold for every
+# index/market — 1.25% here is a reasonable general figure disclosed
+# openly as a simplification, not an exact replica of their internal
+# calibration.
+# ============================================================
+
+def analyze_big_picture(index_hist):
+
+    close = index_hist["Close"].astype(float)
+    volume = index_hist["Volume"].astype(float)
+
+    if len(close) < 60:
+        return None
+
+    ema21 = close.ewm(span=21, adjust=False).mean()
+    ma50 = close.rolling(50).mean()
+
+    daily_pct = close.pct_change() * 100
+
+    # Distribution Days: down >= 0.2% on higher volume than the
+    # prior session, tallied over the trailing 25 sessions
+    distribution_days = 0
+    window = min(25, len(close) - 1)
+
+    for i in range(len(close) - window, len(close)):
+        if i < 1:
+            continue
+        if (
+            daily_pct.iloc[i] <= -0.2
+            and volume.iloc[i] > volume.iloc[i - 1]
+        ):
+            distribution_days += 1
+
+    # Most recent local low (start of a possible rally attempt):
+    # the most recent day whose close is the minimum of a trailing
+    # 10-session window, AND which followed a genuine decline (>= 3%
+    # off the preceding 15-session high) — without this filter, a
+    # flat/choppy stretch can tie as a "local low" with no real
+    # correction behind it, misidentifying a rally-attempt start.
+    rolling_min = close.rolling(10, min_periods=1).min()
+    rolling_high_15 = close.rolling(15, min_periods=1).max().shift(1)
+
+    is_local_low = (
+        (close == rolling_min)
+        & (
+            (rolling_high_15 - close) / rolling_high_15 >= 0.03
+        )
+    )
+
+    low_indices = [
+        i for i in range(len(close))
+        if bool(is_local_low.iloc[i])
+    ]
+
+    rally_day1_idx = low_indices[-1] if low_indices else None
+
+    ftd_idx = None
+    ftd_gain = None
+
+    if rally_day1_idx is not None:
+
+        search_start = rally_day1_idx + 4
+        search_end = min(rally_day1_idx + 10, len(close) - 1)
+
+        for i in range(search_start, search_end + 1):
+            if i < 1 or i >= len(close):
+                continue
+            if (
+                daily_pct.iloc[i] >= 1.25
+                and volume.iloc[i] > volume.iloc[i - 1]
+            ):
+                ftd_idx = i
+                ftd_gain = float(daily_pct.iloc[i])
+                break
+
+    # Power Trend conditions
+    lows = index_hist["Low"].astype(float)
+    last10_lows_above_ema21 = bool(
+        (lows.tail(10) > ema21.tail(10)).all()
+    ) if len(close) >= 10 else False
+
+    ema21_above_ma50_5d = bool(
+        (ema21.tail(5) > ma50.tail(5)).all()
+    ) if len(close) >= 55 else False
+
+    ema21_rising = bool(
+        ema21.iloc[-1] > ema21.iloc[-5]
+    ) if len(close) >= 5 else False
+
+    high_52w = float(close.max())
+    low_52w = float(close.min())
+    range_52w = high_52w - low_52w
+    price_percentile = (
+        (float(close.iloc[-1]) - low_52w) / range_52w
+        if range_52w > 0 else 0
+    )
+    in_top_quarter = price_percentile >= 0.75
+
+    power_trend = (
+        last10_lows_above_ema21
+        and ema21_above_ma50_5d
+        and ema21_rising
+        and in_top_quarter
+    )
+
+    if power_trend:
+        state = "Power Trend"
+    elif ftd_idx is not None and ftd_idx >= len(close) - 40:
+        state = "Confirmed Uptrend"
+    elif distribution_days >= 5:
+        state = "Uptrend Under Pressure"
+    else:
+        state = "Correction / No Confirmed Uptrend"
+
+    return {
+        "state": state,
+        "distribution_days": distribution_days,
+        "rally_day1_date": (
+            index_hist.index[rally_day1_idx]
+            if rally_day1_idx is not None else None
+        ),
+        "ftd_date": (
+            index_hist.index[ftd_idx]
+            if ftd_idx is not None else None
+        ),
+        "ftd_gain": ftd_gain,
+        "power_trend": power_trend,
+        "price_percentile_52w": price_percentile * 100
+    }
+
+
+# ============================================================
+# RS LINE + BLUE DOT
+#
+# Distinct from the RS Rating (a percentile number): this is IBD's
+# RS Line chart overlay — the ratio of stock price to index price
+# over time. A "Blue Dot" marks a day where that ratio hits a new
+# high (the stock is outperforming the index more than it ever has
+# in this window) while the stock's own price is also near its own
+# high — a documented early-strength signal distinct from the RS
+# Rating number, not a restatement of it.
+# ============================================================
+
+def compute_rs_line(stock_hist, index_hist, near_high_pct=10.0):
+
+    stock_close = stock_hist["Close"].astype(float)
+    index_close = index_hist["Close"].astype(float)
+
+    aligned = pd.DataFrame({
+        "stock": stock_close,
+        "index": index_close
+    }).dropna()
+
+    if aligned.empty or len(aligned) < 20:
+        return None
+
+    rs_ratio = aligned["stock"] / aligned["index"]
+    rs_line = (rs_ratio / rs_ratio.iloc[0]) * 100
+
+    rs_running_max = rs_line.cummax()
+    is_new_rs_high = rs_line >= rs_running_max
+
+    stock_running_max = aligned["stock"].cummax()
+    pct_off_stock_high = (
+        (aligned["stock"] - stock_running_max) / stock_running_max
+    ) * 100
+
+    is_near_price_high = pct_off_stock_high >= -near_high_pct
+
+    blue_dot = is_new_rs_high & is_near_price_high
+
+    blue_dot_dates = list(aligned.index[blue_dot])
+
+    latest_blue_dot = bool(blue_dot.iloc[-1])
+
+    recent_blue_dot = (
+        bool(blue_dot.tail(10).any())
+        if len(blue_dot) >= 10
+        else latest_blue_dot
+    )
+
+    return {
+        "rs_line": rs_line,
+        "dates": aligned.index,
+        "blue_dot_mask": blue_dot,
+        "blue_dot_dates": blue_dot_dates,
+        "latest_blue_dot": latest_blue_dot,
+        "recent_blue_dot": recent_blue_dot
+    }
+
+
+# ============================================================
+# PATTERN RECOGNITION — CUP WITH HANDLE (heuristic)
+#
+# A simplified, openly-disclosed heuristic version of the classic
+# O'Neil base pattern — NOT a claimed replica of MarketSurge's
+# AI-assisted detector. Looks for: a left rim (recent peak), a cup
+# (a decline of 12-33%, O'Neil's typical documented range, followed
+# by recovery back near the left rim), and a handle (a shallower
+# pullback of 8-15% in the upper half of the cup, after the right
+# rim). Heuristic pattern detectors of this kind WILL have false
+# positives/negatives on real data — that's disclosed here and in
+# the UI, not hidden.
+# ============================================================
+
+def detect_cup_and_handle(hist, lookback_weeks=40):
+
+    weekly = hist["Close"].astype(float).resample("W").last().dropna()
+
+    if len(weekly) < 8:
+        return {"detected": False, "reason": "not enough weekly history"}
+
+    window = weekly.tail(lookback_weeks)
+
+    if len(window) < 8:
+        return {"detected": False, "reason": "not enough weekly history"}
+
+    values = window.values
+    n = len(values)
+
+    # Left rim: the highest point in the first half of the window
+    left_half_end = max(n // 2, 3)
+    left_rim_idx = int(np.argmax(values[:left_half_end]))
+    left_rim_price = float(values[left_rim_idx])
+
+    # Cup bottom: the lowest point after the left rim
+    remaining = values[left_rim_idx:]
+    if len(remaining) < 4:
+        return {"detected": False, "reason": "no room for a cup after left rim"}
+
+    bottom_offset = int(np.argmin(remaining))
+    bottom_idx = left_rim_idx + bottom_offset
+    bottom_price = float(values[bottom_idx])
+
+    cup_depth_pct = (
+        (left_rim_price - bottom_price) / left_rim_price
+    ) * 100
+
+    if not (12.0 <= cup_depth_pct <= 33.0):
+        return {
+            "detected": False,
+            "reason": f"cup depth {cup_depth_pct:.1f}% outside the "
+                      f"typical 12-33% range"
+        }
+
+    # Right rim: recovery back within 5% of the left rim, after the bottom
+    after_bottom = values[bottom_idx:]
+    if len(after_bottom) < 3:
+        return {"detected": False, "reason": "no recovery after cup bottom"}
+
+    right_rim_candidates = [
+        i for i, v in enumerate(after_bottom)
+        if v >= left_rim_price * 0.95
+    ]
+
+    if not right_rim_candidates:
+        return {
+            "detected": False,
+            "reason": "price hasn't recovered back near the left rim"
+        }
+
+    right_rim_offset = right_rim_candidates[0]
+    right_rim_idx = bottom_idx + right_rim_offset
+    right_rim_price = float(values[right_rim_idx])
+
+    # Handle: a shallower pullback after the right rim, in the upper
+    # half of the cup's depth, at least 1 week long
+    after_right_rim = values[right_rim_idx:]
+
+    if len(after_right_rim) < 2:
+        return {
+            "detected": False,
+            "reason": "no handle has formed yet after the right rim",
+            "cup_only": True,
+            "left_rim_price": left_rim_price,
+            "bottom_price": bottom_price,
+            "right_rim_price": right_rim_price
+        }
+
+    handle_low = float(np.min(after_right_rim))
+    handle_depth_pct = (
+        (right_rim_price - handle_low) / right_rim_price
+    ) * 100
+
+    cup_midpoint = bottom_price + (left_rim_price - bottom_price) * 0.5
+    handle_in_upper_half = handle_low >= cup_midpoint
+
+    handle_valid = (
+        1.0 <= handle_depth_pct <= 15.0
+        and handle_in_upper_half
+    )
+
+    pivot_price = float(np.max(after_right_rim))
+
+    return {
+        "detected": bool(handle_valid),
+        "left_rim_price": left_rim_price,
+        "cup_bottom_price": bottom_price,
+        "cup_depth_pct": cup_depth_pct,
+        "right_rim_price": right_rim_price,
+        "handle_depth_pct": handle_depth_pct,
+        "handle_in_upper_half": handle_in_upper_half,
+        "pivot_price": pivot_price,
+        "reason": (
+            "valid cup-with-handle" if handle_valid
+            else f"handle depth {handle_depth_pct:.1f}% or position "
+                 f"doesn't meet the 1-15%-in-upper-half rule"
+        )
+    }
 
 
 # ============================================================
@@ -2725,6 +3049,276 @@ metric_card(
         else "Outside setup zone"
     )
 )
+
+
+# ============================================================
+# ADVANCED SIGNALS — roadmap + 4-mode toggle
+# ============================================================
+
+st.markdown("---")
+
+st.markdown("### 🚀 Advanced Signals")
+
+with st.expander("📊 Feature roadmap vs. MarketSurge (formerly MarketSmith)"):
+
+    st.markdown(
+        "| MarketSurge feature | What it does | Us | Status |\n"
+        "|---|---|---|---|\n"
+        "| Big Picture / Market School | Follow-Through Day, Power Trend, Distribution Days | ✅ | Built below |\n"
+        "| RS Line + Blue Dot | Stock-vs-index ratio, new-high marker | ✅ | Built below |\n"
+        "| Near Pivot / Recent Breakouts lists | Pre-filtered setup lists | ✅ | Built below |\n"
+        "| Pattern Recognition (cup-w-handle) | Auto-detects base patterns | ✅ | Built below (heuristic) |\n"
+        "| Sales+Margins+ROE (SMR) Rating | Fundamental quality grade A-E | ✅ | In Qualification Screen |\n"
+        "| Composite Rating | Blends EPS+RS+SMR+Acc/Dis | ✅ | In leaderboard table |\n"
+        "| Sponsorship Rating (fund ownership) | 3-yr institutional trend | ❌ | No free India data source |\n"
+        "| Industry Group RS | Stock's sector ranked vs all sectors | ❌ | Needs full NSE sector universe |\n"
+    )
+
+if "advanced_mode" not in st.session_state:
+    st.session_state.advanced_mode = "big_picture"
+
+mode_col1, mode_col2, mode_col3, mode_col4 = st.columns(4)
+
+with mode_col1:
+    if st.button("📈 Big Picture", use_container_width=True):
+        st.session_state.advanced_mode = "big_picture"
+
+with mode_col2:
+    if st.button("📊 RS Line & Blue Dot", use_container_width=True):
+        st.session_state.advanced_mode = "rs_line"
+
+with mode_col3:
+    if st.button("🎯 Near Pivot / Breakouts", use_container_width=True):
+        st.session_state.advanced_mode = "pivot_list"
+
+with mode_col4:
+    if st.button("🔍 Pattern Recognition", use_container_width=True):
+        st.session_state.advanced_mode = "pattern"
+
+mode = st.session_state.advanced_mode
+
+
+# ---- Mode 1: Big Picture ----
+if mode == "big_picture":
+
+    st.markdown("#### 📈 Big Picture — Market School (NIFTY 50)")
+
+    st.caption(
+        "IBD's published rally/Follow-Through Day rules, applied to "
+        "NIFTY 50. The 1.25% FTD gain threshold is a disclosed "
+        "simplification — IBD doesn't publish one uniform figure "
+        "for every index."
+    )
+
+    if market_direction is not None and "hist" in market_direction:
+
+        bp = analyze_big_picture(market_direction["hist"])
+
+        if bp is not None:
+
+            bpc1, bpc2, bpc3, bpc4 = st.columns(4)
+
+            metric_card(
+                bpc1,
+                "Market State",
+                bp["state"],
+                "Current Big Picture read"
+            )
+
+            metric_card(
+                bpc2,
+                "Distribution Days",
+                str(bp["distribution_days"]),
+                "Trailing 25 sessions (5+ = caution)"
+            )
+
+            metric_card(
+                bpc3,
+                "Follow-Through Day",
+                (
+                    bp["ftd_date"].strftime("%Y-%m-%d")
+                    if bp["ftd_date"] is not None
+                    else "None recent"
+                ),
+                f"+{bp['ftd_gain']:.2f}%" if bp["ftd_gain"] else "—"
+            )
+
+            metric_card(
+                bpc4,
+                "52w Range Position",
+                f"{bp['price_percentile_52w']:.0f}%",
+                "Top 25% needed for Power Trend"
+            )
+
+        else:
+            st.warning("Not enough index history to run Big Picture analysis.")
+
+    else:
+        st.warning("NIFTY 50 data unavailable — Big Picture can't be computed.")
+
+
+# ---- Mode 2: RS Line & Blue Dot ----
+elif mode == "rs_line":
+
+    st.markdown(f"#### 📊 RS Line & Blue Dot — {selected_stock}")
+
+    st.caption(
+        "The RS Line (stock price ÷ index price) is a different signal "
+        "from the RS Rating number — a Blue Dot marks a day where this "
+        "ratio hits a new high while price is also near its own high."
+    )
+
+    if market_direction is not None and "hist" in market_direction:
+
+        rsl = compute_rs_line(df_chart, market_direction["hist"])
+
+        if rsl is not None:
+
+            rs_fig = go.Figure()
+
+            rs_fig.add_trace(go.Scatter(
+                x=rsl["dates"],
+                y=rsl["rs_line"],
+                mode="lines",
+                name="RS Line",
+                line=dict(color="#8b5cf6", width=2)
+            ))
+
+            if rsl["blue_dot_dates"]:
+
+                rs_fig.add_trace(go.Scatter(
+                    x=rsl["blue_dot_dates"],
+                    y=[
+                        rsl["rs_line"].loc[d]
+                        for d in rsl["blue_dot_dates"]
+                    ],
+                    mode="markers",
+                    name="Blue Dot",
+                    marker=dict(color="#00d4ff", size=8, symbol="circle")
+                ))
+
+            rs_fig.update_layout(
+                height=400,
+                template="plotly_dark" if theme == "Dark" else "plotly_white",
+                margin=dict(l=10, r=10, t=30, b=10)
+            )
+
+            st.plotly_chart(rs_fig, use_container_width=True)
+
+            st.info(
+                "🔵 Recent Blue Dot (last 10 sessions)"
+                if rsl["recent_blue_dot"]
+                else "No recent Blue Dot in the last 10 sessions"
+            )
+
+        else:
+            st.warning("Not enough overlapping history to compute the RS Line.")
+
+    else:
+        st.warning("NIFTY 50 data unavailable — RS Line can't be computed.")
+
+
+# ---- Mode 3: Near Pivot / Recent Breakouts ----
+elif mode == "pivot_list":
+
+    st.markdown("#### 🎯 Near Pivot / Recent Breakouts")
+
+    st.caption(
+        "Near Pivot: within 5% below the pivot, not yet broken out. "
+        "Recent Breakouts: crossed above pivot within the last 10 sessions."
+    )
+
+    near_pivot_rows = []
+    breakout_rows = []
+
+    for ticker, rec in master_records.items():
+
+        delta = rec["raw_pivot_delta"]
+
+        if -5.0 <= delta < 0:
+
+            near_pivot_rows.append({
+                "Ticker": ticker,
+                "Price": rec["Price"],
+                "Pivot Delta": rec["Pivot Delta"]
+            })
+
+        elif delta >= 0:
+
+            hist_r = rec["raw_hist"]
+            pivot_r = rec["raw_pivot"]
+            closes_r = hist_r["Close"].tail(11)
+
+            crossed_recently = False
+
+            for i in range(1, len(closes_r)):
+                if (
+                    closes_r.iloc[i - 1] < pivot_r
+                    and closes_r.iloc[i] >= pivot_r
+                ):
+                    crossed_recently = True
+                    break
+
+            if crossed_recently:
+
+                breakout_rows.append({
+                    "Ticker": ticker,
+                    "Price": rec["Price"],
+                    "Pivot Delta": rec["Pivot Delta"]
+                })
+
+    pcol1, pcol2 = st.columns(2)
+
+    with pcol1:
+        st.markdown("**Near Pivot**")
+        if near_pivot_rows:
+            st.dataframe(
+                pd.DataFrame(near_pivot_rows),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.caption("No stocks currently within 5% below their pivot.")
+
+    with pcol2:
+        st.markdown("**Recent Breakouts**")
+        if breakout_rows:
+            st.dataframe(
+                pd.DataFrame(breakout_rows),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.caption("No stocks broke out above pivot in the last 10 sessions.")
+
+
+# ---- Mode 4: Pattern Recognition ----
+elif mode == "pattern":
+
+    st.markdown(f"#### 🔍 Pattern Recognition — {selected_stock}")
+
+    st.caption(
+        "A simplified, disclosed heuristic for the classic cup-with-handle "
+        "base — not a claimed replica of MarketSurge's AI detector. Will "
+        "have false positives/negatives on real data."
+    )
+
+    pattern_result = detect_cup_and_handle(df_chart)
+
+    if pattern_result["detected"]:
+
+        st.success("✅ Valid cup-with-handle pattern detected")
+
+        pc1, pc2, pc3, pc4 = st.columns(4)
+
+        metric_card(pc1, "Left Rim", f"₹{pattern_result['left_rim_price']:.2f}", "Cup start")
+        metric_card(pc2, "Cup Bottom", f"₹{pattern_result['cup_bottom_price']:.2f}", f"{pattern_result['cup_depth_pct']:.1f}% deep")
+        metric_card(pc3, "Right Rim", f"₹{pattern_result['right_rim_price']:.2f}", "Cup recovery")
+        metric_card(pc4, "Pivot (buy point)", f"₹{pattern_result['pivot_price']:.2f}", f"Handle {pattern_result['handle_depth_pct']:.1f}% deep")
+
+    else:
+
+        st.info(f"No valid cup-with-handle pattern currently: {pattern_result.get('reason', 'unknown')}")
 
 
 # ============================================================
