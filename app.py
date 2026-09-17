@@ -1156,6 +1156,17 @@ def check_market_direction():
         if index_hist.empty or len(index_hist) < 200:
             return None
 
+        # FIX: df_chart (the selected stock's history) gets its
+        # timezone stripped elsewhere in the app before use, but this
+        # index history never did — real yfinance data comes back
+        # tz-aware, and combining it with tz-naive data later (in
+        # compute_rs_line) raises "Cannot join tz-naive with tz-aware
+        # DatetimeIndex". Normalizing once here, the same way df_chart
+        # already is, fixes it at the source for every downstream use.
+        index_hist.index = pd.to_datetime(index_hist.index)
+        if index_hist.index.tz is not None:
+            index_hist.index = index_hist.index.tz_localize(None)
+
         index_close = index_hist["Close"]
         index_price = float(index_close.iloc[-1])
         ma50 = float(index_close.rolling(50).mean().iloc[-1])
@@ -1334,6 +1345,20 @@ def compute_rs_line(stock_hist, index_hist, near_high_pct=10.0):
 
     stock_close = stock_hist["Close"].astype(float)
     index_close = index_hist["Close"].astype(float)
+
+    # Defensive: strip timezone from both sides regardless of what the
+    # caller passed in — this function shouldn't assume its inputs were
+    # already normalized upstream.
+    stock_close = stock_close.copy()
+    index_close = index_close.copy()
+
+    stock_close.index = pd.to_datetime(stock_close.index)
+    if stock_close.index.tz is not None:
+        stock_close.index = stock_close.index.tz_localize(None)
+
+    index_close.index = pd.to_datetime(index_close.index)
+    if index_close.index.tz is not None:
+        index_close.index = index_close.index.tz_localize(None)
 
     aligned = pd.DataFrame({
         "stock": stock_close,
@@ -1702,6 +1727,46 @@ market_direction = check_market_direction()
 
 
 # ============================================================
+# TICKER NAME SEARCH — fallback when the exact symbol doesn't
+# match. Our previous search only ever tried an exact match, so a
+# company name, a slight typo, or the right name in the wrong
+# symbol convention (e.g. "ELGI EQUIPMENTS.NS" instead of the real
+# "ELGIEQUIP.NS") just failed silently with no help. This uses
+# yfinance's own Search API (a wrapper around Yahoo's public
+# search/autocomplete endpoint — no new dependency) to suggest
+# real NSE-listed matches by company name.
+# ============================================================
+
+def search_ticker_candidates(query):
+
+    candidates = []
+
+    try:
+        if hasattr(yf, "Search"):
+
+            searcher = yf.Search(query, max_results=10)
+            quotes = getattr(searcher, "quotes", None) or []
+
+            for q in quotes:
+
+                symbol = q.get("symbol", "")
+                name = (
+                    q.get("shortname")
+                    or q.get("longname")
+                    or symbol
+                )
+                exch = q.get("exchDisp", "")
+
+                if symbol.endswith(".NS") or "NSE" in exch.upper():
+                    candidates.append((symbol, name))
+
+    except Exception:
+        candidates = []
+
+    return candidates
+
+
+# ============================================================
 # CONTROL BAR (replaces the sidebar — stock picker, search,
 # theme toggle, and system status, all on the main page)
 # ============================================================
@@ -1743,45 +1808,107 @@ with control_col1:
 with control_col2:
 
     search_query = st.text_input(
-        "🔎 Search NSE ticker",
-        placeholder="Example: HAL.NS"
-    ).strip().upper()
+        "🔎 Search NSE ticker or company name",
+        placeholder="Example: HAL.NS or Elgi Equipments"
+    ).strip()
 
     if search_query:
 
-        if search_query in master_records:
+        # FIX: auto-append .NS when the person typed a bare symbol
+        # with no suffix at all (e.g. "ELGIEQUIP" instead of
+        # "ELGIEQUIP.NS") — a very common way this used to fail.
+        normalized = search_query.upper()
 
-            selected_stock = search_query
+        if (
+            "." not in normalized
+            and " " not in normalized
+        ):
+            normalized = normalized + ".NS"
+
+        if normalized in master_records:
+
+            selected_stock = normalized
 
         else:
 
             with st.spinner(
-                f"Loading {search_query}..."
+                f"Loading {normalized}..."
             ):
 
                 _, extra_records = (
                     professional_ml_pipeline(
-                        [search_query]
+                        [normalized]
                     )
                 )
 
-            if search_query in extra_records:
+            if normalized in extra_records:
 
                 master_records.update(
                     extra_records
                 )
 
-                selected_stock = search_query
+                selected_stock = normalized
 
                 st.success(
-                    f"{search_query} loaded"
+                    f"{normalized} loaded"
                 )
 
             else:
 
-                st.error(
-                    "Ticker not found."
-                )
+                # Exact match failed — fall back to name search
+                # instead of just giving up.
+                candidates = search_ticker_candidates(search_query)
+
+                if candidates:
+
+                    st.info(
+                        f"'{search_query}' isn't an exact NSE symbol — "
+                        "did you mean one of these?"
+                    )
+
+                    options = [
+                        f"{sym} — {name}"
+                        for sym, name in candidates
+                    ]
+
+                    picked = st.selectbox(
+                        "Matches",
+                        options,
+                        key="search_candidate_pick"
+                    )
+
+                    picked_symbol = picked.split(" — ")[0]
+
+                    with st.spinner(
+                        f"Loading {picked_symbol}..."
+                    ):
+
+                        _, extra2 = professional_ml_pipeline(
+                            [picked_symbol]
+                        )
+
+                    if picked_symbol in extra2:
+
+                        master_records.update(extra2)
+                        selected_stock = picked_symbol
+
+                    else:
+
+                        st.error(
+                            f"Found {picked_symbol} but couldn't load "
+                            f"its price data — it may be too newly "
+                            f"listed or too thinly traded."
+                        )
+
+                else:
+
+                    st.error(
+                        f"Couldn't find '{search_query}' on NSE, and no "
+                        "name-based matches turned up either. Double-check "
+                        "the exact NSE symbol — company names don't always "
+                        "match the trading symbol (e.g. 'Elgi Equipments' "
+                        "trades as ELGIEQUIP.NS)."
+                    )
 
 with control_col3:
 
