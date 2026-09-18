@@ -2235,6 +2235,69 @@ last_refresh = _last_pipeline_refresh_time()
 
 
 # ============================================================
+# WEEKLY PICKS — a locked-in list for a ~1-week holding period,
+# not the same as the always-shuffling live table above.
+#
+# The ML model already predicts a 5-trading-day (~1 week) horizon —
+# that part already existed. What was missing: the pick LIST itself
+# reshuffled every 60 seconds along with live prices, which is
+# useless for "buy Monday, hold the week, reassess next week."
+#
+# Keyed by ISO week number: the FIRST time this runs in a given
+# week, it snapshots qualifying stocks (Go Ahead ✅) ranked by ML
+# Probability, with their price and target AT THAT MOMENT. Because
+# it's cached on the week-key argument, every later call THAT SAME
+# WEEK returns the identical frozen snapshot — it only regenerates
+# when the ISO week number itself changes. No external database
+# needed for this specific behavior.
+#
+# Real limitation, stated plainly: this cache lives in the app's
+# process memory. If Streamlit Cloud restarts the app mid-week (it
+# can, on free hosting), this week's frozen picks are lost and
+# regenerate fresh on the next load — there's no persistent storage
+# backing this, and building one would need a real database with
+# its own setup.
+# ============================================================
+
+@st.cache_data(ttl=86400)
+def get_weekly_picks(iso_week_key, tickers, top_n=5):
+
+    df_rank, records = professional_ml_pipeline(tickers)
+    mkt = check_market_direction()
+
+    qualifying = []
+
+    for ticker, rec in records.items():
+
+        _, _, _, go_ahead = evaluate_qualification(rec, mkt)
+
+        if go_ahead:
+
+            qualifying.append({
+                "ticker": ticker,
+                "ml_prob": rec["raw_ml_prob"],
+                "entry_price": rec["raw_price"],
+                "pivot": rec["raw_pivot"]
+            })
+
+    qualifying.sort(key=lambda x: x["ml_prob"], reverse=True)
+
+    return {
+        "week_key": iso_week_key,
+        "picks": qualifying[:top_n],
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+
+
+_now = datetime.now()
+_iso_year, _iso_week, _ = _now.isocalendar()
+_current_week_key = f"{_iso_year}-W{_iso_week:02d}"
+_days_left_in_week = 7 - _now.isoweekday()
+
+weekly_picks_data = get_weekly_picks(_current_week_key, CORE_POOL)
+
+
+# ============================================================
 # TICKER NAME SEARCH — fallback when the exact symbol doesn't
 # match. Our previous search only ever tried an exact match, so a
 # company name, a slight typo, or the right name in the wrong
@@ -3863,6 +3926,96 @@ metric_card(
         else "Outside setup zone"
     )
 )
+
+
+# ============================================================
+# THIS WEEK'S PICKS — locked in for the week (see the function
+# above for how); separate from the always-live table below.
+# ============================================================
+
+st.markdown("### 📅 This Week's Picks (locked until next week)")
+
+with st.container(border=True):
+
+    wcol1, wcol2 = st.columns([10, 1])
+
+    with wcol1:
+        st.caption(
+            f"Week {weekly_picks_data['week_key']} · snapshot taken "
+            f"{weekly_picks_data['generated_at']} · {_days_left_in_week} "
+            "day(s) left before this list rotates"
+        )
+
+    with wcol2:
+        info_button(
+            "Snapshotted once per ISO week (Mon-Sun), from stocks "
+            "that passed the full Qualification Screen at that "
+            "moment, ranked by 5-session ML Probability. Stays fixed "
+            "all week even though the live table below keeps "
+            "updating — meant for a weekly hold, not a daily trade.\n\n"
+            "**Hold/On Track**: compares today's live price to the "
+            "price when this week's list was locked in. 'Hold' means "
+            "the pick hasn't moved favorably yet — not a sell "
+            "signal, just an honest 'still developing'."
+        )
+
+    if not weekly_picks_data["picks"]:
+
+        st.info(
+            "No stocks passed every qualification check at this "
+            "week's snapshot — an empty week is a real, valid "
+            "outcome (especially when Market Direction is "
+            "Unfavorable), not a bug. Check back next week, or "
+            "review the live table below for stocks close to "
+            "qualifying."
+        )
+
+    else:
+
+        weekly_rows = []
+
+        for pick in weekly_picks_data["picks"]:
+
+            ticker = pick["ticker"]
+
+            current_rec = master_records.get(ticker)
+
+            if current_rec is not None:
+                current_price = current_rec["raw_price"]
+            else:
+                current_price = pick["entry_price"]
+
+            pct_change = (
+                (current_price - pick["entry_price"])
+                / pick["entry_price"]
+            ) * 100
+
+            hold_status = (
+                "✅ On Track" if pct_change > 0 else "⏳ Hold"
+            )
+
+            weekly_rows.append({
+                "Ticker": ticker,
+                "Entry Price (this week)": f"₹{pick['entry_price']:.2f}",
+                "Current Price": f"₹{current_price:.2f}",
+                "Change Since Entry": f"{pct_change:+.1f}%",
+                "ML Prob. at Entry": f"{pick['ml_prob']:.1f}%",
+                "Status": hold_status
+            })
+
+        st.dataframe(
+            pd.DataFrame(weekly_rows),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.caption(
+            "⚠️ This is a snapshot of a model's estimate, not a "
+            "trading signal — see the Model Accuracy backtest "
+            "(under Market Intelligence) before weighting this "
+            "heavily; the ML Probability itself is not universally "
+            "proven accurate."
+        )
 
 
 # ============================================================
