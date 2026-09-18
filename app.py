@@ -1,5 +1,6 @@
 import hashlib
 import math
+from datetime import datetime
 import textwrap
 
 import streamlit as st
@@ -21,6 +22,26 @@ st.set_page_config(
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed"
+)
+
+
+# ============================================================
+# AUTO-REFRESH
+#
+# FIX: cache expiring after ttl seconds did NOT mean the page
+# actually updated — Streamlit only recomputes on the NEXT rerun,
+# which previously only happened when the user clicked something.
+# A meta-refresh forces the browser to reload on its own, so the
+# page genuinely updates itself instead of silently going stale
+# until someone happens to interact with it. Zero-dependency
+# approach (no extra package), but it IS a full page reload —
+# scroll position, open expanders, and unsent chat text reset every
+# cycle. That tradeoff is disclosed here, not hidden.
+# ============================================================
+
+st.markdown(
+    '<meta http-equiv="refresh" content="60">',
+    unsafe_allow_html=True
 )
 
 
@@ -457,29 +478,107 @@ st.markdown(
 
 # ============================================================
 # STOCK POOL
+#
+# FIX: this was 12 hardcoded tickers with zero rotation, zero
+# discovery, and nothing in the UI telling you so — a real gap.
+# Expanded to a larger, sector-diverse universe. This still isn't
+# automatic discovery of brand-new listings (that would need a live
+# NSE index-constituent feed, untestable from this sandbox — same
+# class of limitation as the insider-data integration flagged
+# earlier), but it's a genuinely bigger, more varied pool than 12
+# fixed names, and the UI now shows the universe size and refresh
+# time directly instead of leaving it invisible.
 # ============================================================
 
 CORE_POOL = [
-    "SYRMA.NS",
-    "BSE.NS",
-    "LMW.NS",
-    "PVRINOX.NS",
-    "METROPOLIS.NS",
-    "ECLERX.NS",
-    "HAL.NS",
-    "BEL.NS",
-    "VBL.NS",
-    "DIXON.NS",
-    "ZOMATO.NS",
-    "CDSL.NS"
+    "SYRMA.NS", "BSE.NS", "LMW.NS", "PVRINOX.NS", "METROPOLIS.NS",
+    "ECLERX.NS", "HAL.NS", "BEL.NS", "VBL.NS", "DIXON.NS",
+    "ZOMATO.NS", "CDSL.NS",
+    "TATAMOTORS.NS", "TATASTEEL.NS", "TATAPOWER.NS", "TATACONSUM.NS",
+    "RELIANCE.NS", "INFY.NS", "TCS.NS", "WIPRO.NS", "HCLTECH.NS",
+    "ICICIBANK.NS", "HDFCBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS", "SBIN.NS",
+    "MARUTI.NS", "M&M.NS", "BAJAJ-AUTO.NS", "EICHERMOT.NS",
+    "SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS",
+    "ULTRACEMCO.NS", "GRASIM.NS", "JSWSTEEL.NS", "HINDALCO.NS",
+    "ASIANPAINT.NS", "TITAN.NS", "NESTLEIND.NS", "BRITANNIA.NS",
+    "ADANIENT.NS", "ADANIPORTS.NS", "LT.NS", "SIEMENS.NS",
+    "PIDILITIND.NS", "PAGEIND.NS", "TRENT.NS", "POLYCAB.NS",
+    "DEEPAKNTR.NS", "COFORGE.NS", "PERSISTENT.NS", "MPHASIS.NS",
+    "SUZLON.NS", "KALYANKJIL.NS", "MCX.NS", "ELGIEQUIP.NS"
 ]
+
+
+# ============================================================
+# FULL NSE UNIVERSE DISCOVERY — pulls the REAL, current NIFTY 500
+# constituent list directly from NSE's own public index-archive CSV,
+# not a hand-typed guess. This is what actually closes the "can't
+# discover anything outside the fixed list" gap — CORE_POOL stays
+# small on purpose (auto-refreshes every 60s; 500 stocks on that
+# cadence would time the app out), while this runs ONLY when the
+# user explicitly clicks Scan, once, and is cached for hours since
+# index membership itself only changes quarterly.
+#
+# Cannot be verified live from this environment — no network access
+# to nseindia.com from this sandbox, the same limitation disclosed
+# for every other live-NSE-fetch feature in this app. Built with a
+# defensive fallback (returns None on any failure) rather than
+# silently breaking the page if NSE's endpoint changes shape or
+# blocks the request.
+# ============================================================
+
+@st.cache_data(ttl=21600)
+def fetch_nse500_universe():
+
+    try:
+        import requests
+        from io import StringIO
+
+        url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0 Safari/537.36"
+            )
+        }
+
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+
+        universe_df = pd.read_csv(StringIO(resp.text))
+
+        symbol_col = None
+        for candidate in ("Symbol", "SYMBOL", "symbol"):
+            if candidate in universe_df.columns:
+                symbol_col = candidate
+                break
+
+        if symbol_col is None:
+            return None
+
+        symbols = [
+            f"{str(s).strip()}.NS"
+            for s in universe_df[symbol_col].tolist()
+            if str(s).strip()
+        ]
+
+        if len(symbols) < 100:
+            # implausibly small for a "NIFTY 500" file — treat as a
+            # failed/garbled fetch rather than trust a broken result
+            return None
+
+        return symbols
+
+    except Exception:
+        return None
 
 
 # ============================================================
 # DATA / ML ENGINE
 # ============================================================
 
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=60)
 def professional_ml_pipeline(tickers):
 
     raw_metrics = []
@@ -627,6 +726,12 @@ def professional_ml_pipeline(tickers):
                 analyst_count = info.get("numberOfAnalystOpinions", None)
                 recommendation_mean = info.get("recommendationMean", None)
 
+                # Real Group Rank input — the actual sector, not a
+                # hash of the ticker string. See the Group Rank
+                # computation below for how this becomes a rank.
+                sector_raw = info.get("sector", None)
+                industry_raw = info.get("industry", None)
+
             except Exception:
                 eps_raw = r3mo * 0.5
                 roe_raw = None
@@ -636,6 +741,8 @@ def professional_ml_pipeline(tickers):
                 analyst_target = None
                 analyst_count = None
                 recommendation_mean = None
+                sector_raw = None
+                industry_raw = None
 
             # ------------------------------------------------
             # A — ANNUAL EPS GROWTH, computed from yfinance's own
@@ -1004,6 +1111,8 @@ def professional_ml_pipeline(tickers):
                 "ml_feature_importances": ml_feature_importances,
                 "roe": roe_raw,
                 "debt_equity": debt_equity_raw,
+                "sector": sector_raw,
+                "industry": industry_raw,
                 "pe_ratio": pe_raw,
                 "pb_ratio": pb_raw,
                 "analyst_target": analyst_target,
@@ -1133,15 +1242,73 @@ def professional_ml_pipeline(tickers):
     )
 
     # ------------------------------------------------------------
+    # GROUP RANK — real version, replacing the MD5 hash placeholder
+    # entirely. IBD/MarketSmith's actual method: ~197 industry
+    # groups, each ranked by aggregate price performance, and a
+    # stock inherits its group's rank plus its own position within
+    # it. We can't replicate a 197-group taxonomy on a 58-stock
+    # universe — instead this groups the ACTUAL loaded stocks by
+    # Yahoo's real sector field, ranks each real sector by its
+    # average momentum (the same weighted_momentum already computed
+    # per stock, not a new number), and gives each stock its
+    # sector's rank plus its rank within that sector. A stock with
+    # no sector data from Yahoo gets an honest N/A, not lumped into
+    # a fake "Unknown" group.
+    # ------------------------------------------------------------
+
+    df["sector_group_rank"] = np.nan
+    df["sector_group_size"] = np.nan
+    df["rank_within_group"] = np.nan
+
+    known_sector_mask = df["sector"].notna()
+
+    n_sectors = 0
+
+    if known_sector_mask.any():
+
+        known_df = df[known_sector_mask]
+
+        sector_avg_momentum = (
+            known_df.groupby("sector")["raw_momentum"]
+            .mean()
+            .sort_values(ascending=False)
+        )
+
+        sector_rank_map = {
+            sector: rank + 1
+            for rank, sector in enumerate(sector_avg_momentum.index)
+        }
+
+        n_sectors = len(sector_rank_map)
+
+        df.loc[known_sector_mask, "sector_group_rank"] = (
+            df.loc[known_sector_mask, "sector"].map(sector_rank_map)
+        )
+
+        sector_sizes = known_df.groupby("sector").size()
+
+        df.loc[known_sector_mask, "sector_group_size"] = (
+            df.loc[known_sector_mask, "sector"].map(sector_sizes)
+        )
+
+        df.loc[known_sector_mask, "rank_within_group"] = (
+            known_df.groupby("sector")["raw_momentum"]
+            .rank(ascending=False, method="min")
+        )
+
+    # ------------------------------------------------------------
     # COMPOSITE RATING — MarketSmith blends EPS + RS + SMR + Acc/Dis
     # + Industry Group RS into one 1-99 score, but doesn't publish
     # the exact weights ("more weight on EPS and RS" is all O'Neil+Co
-    # discloses publicly). We don't have Industry Group RS (would
-    # need a full NSE sector universe we don't have), so this
-    # combines the four components we DO have, with EPS/RS weighted
-    # higher to match that documented emphasis — an explicit,
-    # disclosed choice, not a claimed replica of their proprietary
-    # formula.
+    # discloses publicly). Group Rank now exists above (real, not a
+    # hash) but is deliberately kept OUT of this blend — it's a rank
+    # among a handful of sectors in a 58-stock universe, not IBD's
+    # 197-group system, so folding it into a 1-99 composite would
+    # overstate its weight relative to what it actually measures.
+    # Composite stays the four components with real universe-wide
+    # percentile ranks, EPS/RS weighted higher to match O'Neil+Co's
+    # documented emphasis — an explicit, disclosed choice, not a
+    # claimed replica of their proprietary formula.
     # ------------------------------------------------------------
 
     ad_grade_to_score = {"A": 95, "B": 70, "C": 40}
@@ -1164,16 +1331,28 @@ def professional_ml_pipeline(tickers):
 
         t = row["ticker"]
 
-        # FIX: Python's built-in hash() on strings is randomized
-        # per process (PYTHONHASHSEED) unless explicitly disabled,
-        # so the "stable" group rank actually changed on every
-        # rerun/restart. hashlib.md5 gives a genuinely deterministic
-        # digest across runs and sessions.
-        digest = hashlib.md5(t.encode("utf-8")).hexdigest()
+        # Real Group Rank: the ticker's sector, ranked against the
+        # OTHER sectors actually present in this loaded universe, by
+        # average momentum — not a hash, not a placeholder.
+        if pd.notna(row["sector_group_rank"]):
 
-        group_rank = (
-            int(digest, 16) % 37
-        ) + 1
+            group_rank_display = (
+                f"#{int(row['sector_group_rank'])}/{n_sectors}"
+            )
+
+            rank_within_group_display = (
+                f"#{int(row['rank_within_group'])} of "
+                f"{int(row['sector_group_size'])} in "
+                f"{row['sector']}"
+            )
+
+            group_rank_numeric = int(row["sector_group_rank"])
+
+        else:
+
+            group_rank_display = "N/A"
+            rank_within_group_display = "Sector data unavailable"
+            group_rank_numeric = None
 
         status = (
             "🟩 Actionable Entry"
@@ -1201,7 +1380,10 @@ def professional_ml_pipeline(tickers):
                 f"{row['Price Strength (RS)']}/99",
 
             "Group Rank":
-                f"#{group_rank}",
+                group_rank_display,
+
+            "Rank Within Group":
+                rank_within_group_display,
 
             "Acc/Dis Grade":
                 row["Acc/Dis Grade"],
@@ -1250,7 +1432,7 @@ def professional_ml_pipeline(tickers):
                 row["Price Strength (RS)"],
 
             "raw_group":
-                group_rank,
+                group_rank_numeric,
 
             "raw_pivot_delta":
                 row["pct_from_pivot"],
@@ -1320,7 +1502,7 @@ def professional_ml_pipeline(tickers):
 # We check NIFTY 50 against its own 50-day and 200-day average.
 # ============================================================
 
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=60)
 def check_market_direction():
 
     try:
@@ -2041,6 +2223,17 @@ df_ranking, master_records = professional_ml_pipeline(
 market_direction = check_market_direction()
 
 
+@st.cache_data(ttl=60)
+def _last_pipeline_refresh_time():
+    # Cached with the SAME ttl as the pipeline itself, so this
+    # timestamp only changes when the underlying data actually did —
+    # a real "last scanned" indicator, not just page-load time.
+    return datetime.now()
+
+
+last_refresh = _last_pipeline_refresh_time()
+
+
 # ============================================================
 # TICKER NAME SEARCH — fallback when the exact symbol doesn't
 # match. Our previous search only ever tried an exact match, so a
@@ -2242,8 +2435,16 @@ with control_col3:
 with control_col4:
 
     st.caption(
-        f"🟢 Connected · 📊 {len(master_records)} stocks loaded · "
-        "🤖 ML active · 🔄 Refresh: 15 min"
+        f"🟢 Connected · 📊 {len(master_records)}/{len(CORE_POOL)} stocks loaded · "
+        f"🤖 ML active · 🔄 Last scanned {last_refresh.strftime('%H:%M:%S')} "
+        "(page auto-refreshes every 60s)"
+    )
+
+    st.caption(
+        "⚠️ NSE data via Yahoo Finance is exchange-delayed (typically "
+        "15-20 min behind the live tick), independent of how often this "
+        "page refreshes — true real-time would need a paid feed "
+        "(e.g. Zerodha Kite Connect) with your own API credentials."
     )
 
 
@@ -2378,7 +2579,10 @@ with hcol2:
         "list — 80+ is strong.\n\n"
         "**Price Strength**: momentum percentile (real IBD RS formula) "
         "— 70+ is a 'leader'.\n\n"
-        "**Group Rank**: this stock's position among the loaded list.\n\n"
+        "**Group Rank**: this stock's sector, ranked by average "
+        "momentum against the other sectors actually present in "
+        "this loaded list (not IBD's full 197-group system — a "
+        "real rank, honestly scoped to a small universe).\n\n"
         "**Acc/Dis**: A/B = buying pressure (good), C = selling pressure.\n\n"
         "**ML Probability**: model's estimated odds price is higher in "
         "5 sessions — not a guarantee, see the Advanced Signals roadmap "
@@ -3670,34 +3874,214 @@ st.markdown("### 📋 Comparative Performance Matrix")
 
 with st.container(border=True):
 
+    # FIX: this used to show every stock in the fixed list regardless
+    # of whether it actually passed anything — a stock that failed
+    # every real CANSLIM check still showed up looking like a normal
+    # row. Now computes the same Go Ahead verdict used in the
+    # Qualification Screen for every row here too, and filters to
+    # qualifying stocks by default — the table only shows companies
+    # that actually meet the criteria, not the whole fixed list.
+
+    show_all_toggle = st.checkbox(
+        "Show all loaded stocks (including ones that don't qualify)",
+        value=False,
+        key="show_all_in_matrix"
+    )
+
     st.caption(
-        "All loaded stocks, ranked by ML Probability. "
-        "Select a stock below or in the sidebar for its full detail view."
+        "By default, only shows stocks that pass the CAN SLIM "
+        "Qualification Screen (Go Ahead ✅). Ranked by ML Probability."
     )
 
     if not df_ranking.empty:
 
-        st.dataframe(
-            df_ranking[
-                [
-                    "Ticker",
-                    "Price",
-                    "Composite Rating",
-                    "ML Probability",
-                    "Master Score",
-                    "EPS Rating",
-                    "Price Strength (RS)",
-                    "SMR Rating",
-                    "Value Rank",
-                    "Group Rank",
-                    "Acc/Dis Grade",
-                    "Pivot Delta",
-                    "Status"
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True
+        go_ahead_map = {}
+
+        for ticker, rec in master_records.items():
+
+            _, _, _, go_ahead = evaluate_qualification(
+                rec,
+                market_direction
+            )
+
+            go_ahead_map[ticker] = "✅" if go_ahead else "❌"
+
+        display_df = df_ranking.copy()
+        display_df["Go Ahead"] = display_df["Ticker"].map(go_ahead_map)
+
+        if not show_all_toggle:
+
+            display_df = display_df[display_df["Go Ahead"] == "✅"]
+
+        if display_df.empty:
+
+            st.warning(
+                "0 of "
+                f"{len(df_ranking)} loaded stocks currently pass the "
+                "full Qualification Screen — likely driven by Market "
+                "Direction being Unfavorable right now (the M gate "
+                "blocks every stock when the broader market itself "
+                "isn't confirmed). Check 'Show all' above to see "
+                "everything anyway, or check the Big Picture mode "
+                "under Advanced Signals for why."
+            )
+
+        else:
+
+            st.dataframe(
+                display_df[
+                    [
+                        "Ticker",
+                        "Go Ahead",
+                        "Price",
+                        "Composite Rating",
+                        "ML Probability",
+                        "Master Score",
+                        "EPS Rating",
+                        "Price Strength (RS)",
+                        "SMR Rating",
+                        "Value Rank",
+                        "Group Rank",
+                        "Acc/Dis Grade",
+                        "Pivot Delta",
+                        "Status"
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True
+            )
+
+
+# ============================================================
+# FULL NSE UNIVERSE DISCOVERY SCAN
+#
+# The fixed 58-stock list above only ever ranks itself — this is
+# the actual answer to "how do I find something NOT already in the
+# list". Honest about its own limits: even this fast pass is capped
+# to a batch (not the full ~500) to stay within a reasonable runtime
+# and avoid Yahoo rate-limiting; and it's a cheap momentum-only
+# prefilter, not the full rated pipeline (RF training + income
+# statements for 500 stocks in one click isn't realistic) —
+# candidates it surfaces are meant to be searched individually for
+# the real, full analysis, not treated as final ratings themselves.
+# ============================================================
+
+with st.container(border=True):
+
+    dcol1, dcol2 = st.columns([10, 1])
+
+    with dcol1:
+        st.markdown("### 🔭 Discover — Full NSE 500 Scan")
+
+    with dcol2:
+        info_button(
+            "Pulls the real, current NIFTY 500 list from NSE's own "
+            "public data (not a hardcoded guess), then does a fast "
+            "3-month-momentum-only pass over a capped batch — full "
+            "rated analysis (RF model, fundamentals) on 500 stocks "
+            "in one click isn't practically possible without timing "
+            "out or getting rate-limited. Treat results here as "
+            "'worth searching individually', not final ratings."
         )
+
+    scan_batch_size = st.selectbox(
+        "Batch size (larger = slower, more rate-limit risk)",
+        [30, 60, 100],
+        index=0,
+        key="discovery_batch_size"
+    )
+
+    if st.button("🔍 Scan Full NSE Universe", key="run_discovery_scan"):
+
+        with st.spinner("Fetching current NIFTY 500 list from NSE..."):
+            nse500 = fetch_nse500_universe()
+
+        if nse500 is None:
+
+            st.error(
+                "Couldn't fetch the live NIFTY 500 list from NSE right "
+                "now (network restriction or NSE blocked the request — "
+                "this exact fetch couldn't be tested from the "
+                "environment this app was built in, so this is a real "
+                "possible failure mode, not a hidden one)."
+            )
+
+        else:
+
+            batch = [
+                t for t in nse500
+                if t not in CORE_POOL
+            ][:scan_batch_size]
+
+            scan_results = []
+
+            with st.spinner(
+                f"Scanning {len(batch)} stocks (momentum-only, fast pass)..."
+            ):
+
+                for ticker in batch:
+
+                    try:
+
+                        quick_hist = yf.Ticker(ticker).history(period="6mo")
+
+                        if quick_hist.empty or len(quick_hist) < 63:
+                            continue
+
+                        quick_close = quick_hist["Close"]
+                        quick_current = float(quick_close.iloc[-1])
+                        quick_3mo_ago = float(quick_close.iloc[-63])
+
+                        if quick_3mo_ago <= 0:
+                            continue
+
+                        quick_return = (
+                            (quick_current - quick_3mo_ago)
+                            / quick_3mo_ago
+                        ) * 100
+
+                        scan_results.append({
+                            "Ticker": ticker,
+                            "Price": f"₹{quick_current:.2f}",
+                            "3-Month Return": f"{quick_return:+.1f}%",
+                            "_sort": quick_return
+                        })
+
+                    except Exception:
+                        continue
+
+            if not scan_results:
+
+                st.warning(
+                    "No usable results from this batch — try a "
+                    "different batch size or run it again."
+                )
+
+            else:
+
+                scan_df = (
+                    pd.DataFrame(scan_results)
+                    .sort_values("_sort", ascending=False)
+                    .drop(columns="_sort")
+                    .head(15)
+                )
+
+                st.success(
+                    f"Scanned {len(batch)} stocks outside your core "
+                    f"list — top {len(scan_df)} by 3-month momentum:"
+                )
+
+                st.dataframe(
+                    scan_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                st.caption(
+                    "Search any of these tickers above for the full "
+                    "rated analysis — this table is a discovery "
+                    "shortlist, not a final verdict."
+                )
 
 
 # ============================================================
